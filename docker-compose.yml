@@ -12,7 +12,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: change-me
       MYSQL_DATABASE: scholarmind
-    ports: ["3306:3306"]
+    ports: ["3307:3306"]
     volumes:
       - ./data/mysql:/var/lib/mysql
       - ./backend/common/db/mysql_init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -107,7 +107,9 @@ services:
     build: { context: ./backend, dockerfile: Dockerfile }
     container_name: sm_backend
     env_file: [./backend/.env]
-    ports: ["8000:8000"]
+    environment:
+      - MYSQL_PORT=3306
+    ports: ["8008:8000"]
     volumes:
       - ./backend:/app
       - D:/your/models:/models
@@ -119,6 +121,8 @@ services:
     build: { context: ./backend, dockerfile: Dockerfile }
     container_name: sm_worker
     env_file: [./backend/.env]
+    environment:
+      - MYSQL_PORT=3306
     volumes:
       - ./backend:/app
       - D:/your/models:/models
