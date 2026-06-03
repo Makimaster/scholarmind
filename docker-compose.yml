@@ -1,0 +1,130 @@
+# ScholarMind 基础设施一键编排
+# 前端不在此(本地 npm run dev)。模型推理服务(embedding/reranker)用 HuggingFace TEI，
+# 也可改成 vLLM；若用云 API(dashscope) 则把 *_PROVIDER 改为 dashscope 并注释掉对应服务。
+
+name: scholarmind
+
+services:
+  # ---------- 关系库:业务 ----------
+  mysql:
+    image: mysql:8.0
+    container_name: sm_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: change-me
+      MYSQL_DATABASE: scholarmind
+    ports: ["3306:3306"]
+    volumes:
+      - ./data/mysql:/var/lib/mysql
+      - ./backend/common/db/mysql_init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------- 关系库:对话记忆 ----------
+  postgres:
+    image: postgres:16-alpine
+    container_name: sm_postgres
+    environment:
+      POSTGRES_PASSWORD: change-me
+      POSTGRES_DB: scholarmind_memory
+    ports: ["5432:5432"]
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./backend/common/db/pg_init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+
+  # ---------- 缓存 / RQ 队列 ----------
+  redis:
+    image: redis:7-alpine
+    container_name: sm_redis
+    ports: ["6379:6379"]
+    volumes: ["./data/redis:/data"]
+
+  # ---------- 对象存储 (Milvus + 应用共用) ----------
+  minio:
+    image: minio/minio:latest
+    container_name: sm_minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports: ["9000:9000", "9001:9001"]
+    volumes: ["./data/minio:/data"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ---------- Milvus 依赖:etcd ----------
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.5
+    container_name: sm_etcd
+    environment:
+      - ETCD_AUTO_COMPACTION_MODE=revision
+      - ETCD_AUTO_COMPACTION_RETENTION=1000
+      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes: ["./data/etcd:/etcd"]
+
+  # ---------- 向量库 ----------
+  milvus:
+    image: milvusdb/milvus:v2.5.0
+    container_name: sm_milvus
+    command: ["milvus", "run", "standalone"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    ports: ["19530:19530", "9091:9091"]
+    volumes: ["./data/milvus:/var/lib/milvus"]
+    depends_on: [etcd, minio]
+
+  # ---------- 解析:参考文献结构化 ----------
+  grobid:
+    image: lfoppiano/grobid:0.8.1
+    container_name: sm_grobid
+    ports: ["8070:8070"]
+
+  # ---------- Embedding 推理 (TEI;用云API则注释掉) ----------
+  embedding:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    container_name: sm_embedding
+    command: ["--model-id", "BAAI/bge-m3"]   # 换 Qwen3-Embedding 改这里
+    ports: ["8080:80"]
+    volumes: ["./data/models:/data"]
+
+  # ---------- Reranker 推理 (TEI) ----------
+  reranker:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+    container_name: sm_reranker
+    command: ["--model-id", "BAAI/bge-reranker-v2-m3"]  # 换 Qwen3-Reranker 改这里
+    ports: ["8081:80"]
+    volumes: ["./data/models:/data"]
+
+  # ---------- 后端 API ----------
+  backend:
+    build: { context: ./backend, dockerfile: Dockerfile }
+    container_name: sm_backend
+    env_file: [./backend/.env]
+    ports: ["8000:8000"]
+    volumes:
+      - ./backend:/app
+      - D:/your/models:/models
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    depends_on: [mysql, postgres, redis, minio, milvus]
+
+  # ---------- RQ Worker (批量解析索引) ----------
+  worker:
+    build: { context: ./backend, dockerfile: Dockerfile }
+    container_name: sm_worker
+    env_file: [./backend/.env]
+    volumes:
+      - ./backend:/app
+      - D:/your/models:/models
+    command: ["python", "-m", "app.worker.main"]   # 启动 RQ worker
+    depends_on: [redis, mysql, milvus, minio, grobid]
+
+networks:
+  default:
+    name: scholarmind_net

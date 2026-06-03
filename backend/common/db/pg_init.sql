@@ -1,0 +1,22 @@
+-- PostgreSQL schema initialization for ScholarMind Memory (chat-agent only)
+
+CREATE TABLE IF NOT EXISTS conversations (
+  id         BIGSERIAL PRIMARY KEY,
+  user_id    BIGINT NOT NULL,
+  title      VARCHAR(256),
+  created_at TIMESTAMP NOT NULL DEFAULT now(),
+  updated_at TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_conv_user ON conversations(user_id);
+
+CREATE TABLE IF NOT EXISTS messages (
+  id              BIGSERIAL PRIMARY KEY,
+  conversation_id BIGINT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  role            VARCHAR(16) NOT NULL,            -- user | assistant | system
+  content         TEXT NOT NULL,
+  citations       JSONB,                           -- [{paper_id, page, chunk_id, image_key}]
+  created_at      TIMESTAMP NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id);

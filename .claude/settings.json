@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "ruff format ${CLAUDE_FILE_PATHS} 2>/dev/null; ruff check --fix ${CLAUDE_FILE_PATHS} 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
