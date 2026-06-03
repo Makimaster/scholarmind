@@ -49,8 +49,16 @@
                 :key="folder.id" 
                 :class="{ active: selectedFolderId === folder.id }"
                 @click="selectedFolderId = folder.id"
+                class="folder-item"
               >
                 <span>📁 {{ folder.name }}</span>
+                <button 
+                  class="delete-folder-btn" 
+                  @click.stop="confirmDeleteFolder(folder)"
+                  title="删除文件夹"
+                >
+                  🗑️
+                </button>
               </li>
             </ul>
           </div>
@@ -119,10 +127,54 @@
       </div>
     </main>
   </div>
+
+  <!-- Create Folder Custom Modal -->
+  <div v-if="showCreateFolderModal" class="modal-overlay" @click.self="showCreateFolderModal = false">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>📂 新建文献文件夹</h3>
+        <button @click="showCreateFolderModal = false" class="close-modal-btn">×</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>文件夹名称</label>
+          <input 
+            type="text" 
+            v-model="newFolderName" 
+            placeholder="请输入文件夹名称..." 
+            ref="newFolderInputRef"
+            @keyup.enter="submitCreateFolder"
+            autofocus
+          />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button @click="showCreateFolderModal = false" class="btn-secondary">取消</button>
+        <button @click="submitCreateFolder" class="btn-primary" :disabled="!newFolderName.trim()">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirm Custom Modal -->
+  <div v-if="confirmModal.show" class="modal-overlay" @click.self="closeConfirmModal(false)">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>{{ confirmModal.title }}</h3>
+        <button @click="closeConfirmModal(false)" class="close-modal-btn">×</button>
+      </div>
+      <div class="modal-body">
+        <p>{{ confirmModal.message }}</p>
+      </div>
+      <div class="modal-footer">
+        <button @click="closeConfirmModal(false)" class="btn-secondary">取消</button>
+        <button @click="closeConfirmModal(true)" class="btn-danger">确定</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed } from 'vue';
+import { ref, computed, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 
@@ -142,6 +194,17 @@ const isDragging = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const searchQuery = ref('');
 const selectedFolderId = ref<number | null>(null);
+
+const showCreateFolderModal = ref(false);
+const newFolderName = ref('');
+const newFolderInputRef = ref<HTMLInputElement | null>(null);
+
+const confirmModal = ref({
+  show: false,
+  title: '',
+  message: '',
+  onConfirm: null as (() => void) | null
+});
 
 function triggerFileSelect() {
   fileInput.value?.click();
@@ -193,14 +256,36 @@ function handleLogout() {
   router.push('/login');
 }
 
-function createFolder() {
-  const name = prompt('请输入新文件夹名称:');
+async function createFolder() {
+  newFolderName.value = '';
+  showCreateFolderModal.value = true;
+  await nextTick();
+  newFolderInputRef.value?.focus();
+}
+
+function submitCreateFolder() {
+  const name = newFolderName.value.trim();
   if (name) {
     folders.value.push({
       id: Date.now(),
       name: name,
     });
+    showCreateFolderModal.value = false;
   }
+}
+
+function confirmDeleteFolder(folder: { id: number; name: string }) {
+  confirmModal.value = {
+    show: true,
+    title: "🗑️ 删除文献文件夹",
+    message: `确定要删除文件夹 "${folder.name}" 吗？删除该文件夹不会删除其中的文献，文献将被归类到未分类中。`,
+    onConfirm: () => {
+      folders.value = folders.value.filter(f => f.id !== folder.id);
+      if (selectedFolderId.value === folder.id) {
+        selectedFolderId.value = null;
+      }
+    }
+  };
 }
 
 function handleDrop(e: DragEvent) {
@@ -232,10 +317,23 @@ function uploadFiles(files: FileList) {
   }
 }
 
+// Use custom modal for delete confirmation
 function deletePaper(id: number) {
-  if (confirm('确认删除此文献吗？其对应的向量与解析内容均将被彻底清理。')) {
-    papers.value = papers.value.filter(p => p.id !== id);
+  confirmModal.value = {
+    show: true,
+    title: "🗑️ 删除文献",
+    message: "确认删除此文献吗？其对应的向量与解析内容均将被彻底清理，不可恢复。",
+    onConfirm: () => {
+      papers.value = papers.value.filter(p => p.id !== id);
+    }
+  };
+}
+
+function closeConfirmModal(isConfirmed: boolean) {
+  if (isConfirmed && confirmModal.value.onConfirm) {
+    confirmModal.value.onConfirm();
   }
+  confirmModal.value.show = false;
 }
 
 function openPaper(paper: any) {
@@ -408,7 +506,10 @@ function openPaper(paper: any) {
   gap: 8px;
 }
 
-.folder-list li {
+.folder-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   padding: 10px 14px;
   border-radius: 6px;
   cursor: pointer;
@@ -416,14 +517,34 @@ function openPaper(paper: any) {
   font-weight: 500;
 }
 
-.folder-list li:hover {
+.folder-item:hover {
   background-color: #f0f4f1;
 }
 
-.folder-list li.active {
+.folder-item.active {
   background-color: #e3ece6;
   color: #0f3d24;
   font-weight: 600;
+}
+
+.delete-folder-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  padding: 2px 6px;
+  font-size: 14px;
+  border-radius: 4px;
+}
+
+.folder-item:hover .delete-folder-btn {
+  opacity: 0.6;
+}
+
+.delete-folder-btn:hover {
+  opacity: 1 !important;
+  background-color: rgba(197, 48, 48, 0.1);
 }
 
 .upload-section {
@@ -580,5 +701,174 @@ td {
   text-align: center;
   color: #667e6e;
   padding: 30px;
+}
+
+/* Modal Overlays */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(15, 61, 36, 0.4);
+  backdrop-filter: blur(8px);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal-card {
+  background-color: #ffffff;
+  width: 440px;
+  max-width: 90%;
+  border-radius: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 12px 40px rgba(15, 61, 36, 0.15);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: scaleUp 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.modal-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid #e1e6e3;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #0f3d24;
+}
+
+.close-modal-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #667e6e;
+  cursor: pointer;
+  line-height: 1;
+  padding: 4px;
+}
+
+.close-modal-btn:hover {
+  color: #0f3d24;
+}
+
+.modal-body {
+  padding: 24px;
+}
+
+.modal-body p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #2c4d37;
+}
+
+.modal-body .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.modal-body .form-group label {
+  font-size: 13px;
+  font-weight: 700;
+  color: #0f3d24;
+}
+
+.modal-body .form-group input {
+  padding: 12px 16px;
+  border: 1px solid #c2cdc6;
+  border-radius: 8px;
+  font-size: 14px;
+  background-color: #f7f9f8;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.modal-body .form-group input:focus {
+  border-color: #1c7243;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(28, 114, 67, 0.1);
+}
+
+.modal-footer {
+  padding: 16px 24px;
+  background-color: #f8faf9;
+  border-top: 1px solid #e1e6e3;
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.btn-secondary {
+  padding: 10px 16px;
+  background: none;
+  border: 1px solid #c2cdc6;
+  border-radius: 8px;
+  color: #1a3322;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background-color: #f0f3f1;
+}
+
+.btn-primary {
+  padding: 10px 20px;
+  background-color: #0f3d24;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary:hover {
+  background-color: #195232;
+}
+
+.btn-primary:disabled {
+  background-color: #c2cdc6;
+  cursor: not-allowed;
+}
+
+.btn-danger {
+  padding: 10px 20px;
+  background-color: #c53030;
+  border: none;
+  border-radius: 8px;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-danger:hover {
+  background-color: #9b2c2c;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scaleUp {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
 }
 </style>
