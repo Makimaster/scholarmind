@@ -67,7 +67,7 @@
 import { ref, reactive } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
-import api from '../api';
+// import api from '../api';
 
 const router = useRouter();
 const authStore = useAuthStore();

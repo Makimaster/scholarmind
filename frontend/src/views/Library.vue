@@ -62,6 +62,7 @@
             @dragover.prevent="isDragging = true"
             @dragleave.prevent="isDragging = false"
             @drop.prevent="handleDrop"
+            @click="triggerFileSelect"
           >
             <div class="upload-box">
               <span class="upload-icon">📤</span>
@@ -128,10 +129,23 @@ import { useAuthStore } from '../stores/auth';
 const router = useRouter();
 const authStore = useAuthStore();
 
+interface Paper {
+  id: number;
+  title: string;
+  authors: string[];
+  year?: number;
+  status: string;
+  created_at: string;
+}
+
 const isDragging = ref(false);
 const fileInput = ref<HTMLInputElement | null>(null);
 const searchQuery = ref('');
 const selectedFolderId = ref<number | null>(null);
+
+function triggerFileSelect() {
+  fileInput.value?.click();
+}
 
 const statusMap: Record<string, string> = {
   pending: '排队中',
@@ -147,7 +161,7 @@ const folders = ref([
   { id: 3, name: 'RAG 检索增强生成' },
 ]);
 
-const papers = ref([
+const papers = ref<Paper[]>([
   {
     id: 1,
     title: 'Attention Is All You Need',

@@ -155,6 +155,22 @@ import { ref, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
 
+interface Citation {
+  paper_title: string;
+  page_num: number;
+  bbox: string;
+  chunk_type: string;
+  content: string;
+  image_key?: string;
+}
+
+interface Message {
+  id: number;
+  role: string;
+  content: string;
+  citations: Citation[];
+}
+
 const router = useRouter();
 const authStore = useAuthStore();
 
@@ -172,7 +188,7 @@ const blockTypeMap: Record<string, string> = {
   formula: '学术公式',
 };
 
-const messages = ref([
+const messages = ref<Message[]>([
   {
     id: 1,
     role: 'assistant',

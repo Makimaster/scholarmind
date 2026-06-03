@@ -1,0 +1,27 @@
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import datetime
+
+class QueryLogResponse(BaseModel):
+    id: int
+    user_id: int
+    question: str
+    answer_snippet: str
+    latency_ms: int
+    tokens_used: int
+    created_at: datetime
+
+class AccessLogResponse(BaseModel):
+    id: int
+    user_id: Optional[int] = None
+    path: str
+    method: str
+    status_code: int
+    ip_address: str
+    created_at: datetime
+
+class StatsOverviewResponse(BaseModel):
+    paper_count: int
+    chunk_count: int
+    total_queries: int
+    average_latency_ms: float
