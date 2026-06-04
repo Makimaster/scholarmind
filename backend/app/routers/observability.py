@@ -58,15 +58,21 @@ MOCK_ACCESS_LOGS = [
     )
 ]
 
-@router.get("/logs/queries", response_model=List[QueryLogResponse])
+@router.get("/logs/queries", response_model=List[QueryLogResponse],
+            summary="查询日志",
+            description="分页获取用户提问记录，包含问题内容、回答摘要、延迟（ms）和 token 消耗。用于可观测性面板和问答质量分析。")
 async def list_query_logs(limit: int = 10, offset: int = 0):
     return MOCK_QUERY_LOGS[offset:offset + limit]
 
-@router.get("/logs/access", response_model=List[AccessLogResponse])
+@router.get("/logs/access", response_model=List[AccessLogResponse],
+            summary="访问日志",
+            description="分页获取 API 访问记录，含路径、方法、状态码和 IP。用于安全审计和流量监控。")
 async def list_access_logs(limit: int = 10, offset: int = 0):
     return MOCK_ACCESS_LOGS[offset:offset + limit]
 
-@router.get("/stats/overview", response_model=StatsOverviewResponse)
+@router.get("/stats/overview", response_model=StatsOverviewResponse,
+            summary="系统概览统计",
+            description="返回系统核心指标：已入库论文总数、向量 chunk 总数、历史查询总次数、平均问答延迟（ms）。用于可观测性面板首页。")
 async def get_stats_overview():
     return StatsOverviewResponse(
         paper_count=12,

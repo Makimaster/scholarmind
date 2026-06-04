@@ -51,7 +51,9 @@ MOCK_PAPERS = [
 
 # --- Papers Router Endpoints ---
 
-@router.post("/upload", response_model=PaperUploadResponse, status_code=status.HTTP_202_ACCEPTED)
+@router.post("/upload", response_model=PaperUploadResponse, status_code=status.HTTP_202_ACCEPTED,
+             summary="批量上传 PDF 论文",
+             description="上传一个或多个 PDF 文件，异步入库（202 立即返回）。返回 `batch_id` 和各文件对应的 `task_id`，通过 `/ingest/batches/{batch_id}` 轮询进度。")
 async def upload_papers(
     files: List[UploadFile] = File(...),
     folder_id: Optional[int] = Form(None)
@@ -84,7 +86,9 @@ async def upload_papers(
         tasks=task_ids
     )
 
-@router.get("", response_model=List[PaperResponse])
+@router.get("", response_model=List[PaperResponse],
+            summary="论文列表",
+            description="获取当前用户的论文列表，支持按文件夹（`folder_id`）和解析状态（`pending/parsing/indexing/completed/failed`）过滤。")
 async def list_papers(
     folder_id: Optional[int] = None,
     status: Optional[str] = None
@@ -96,14 +100,18 @@ async def list_papers(
         results = [p for p in results if p.status == status]
     return results
 
-@router.get("/{id}", response_model=PaperDetailResponse)
+@router.get("/{id}", response_model=PaperDetailResponse,
+            summary="论文详情",
+            description="获取单篇论文的完整信息，包含标题、作者、摘要、解析状态、MinIO 文件路径及附加元数据。")
 async def get_paper_detail(id: int):
     for paper in MOCK_PAPERS:
         if paper.id == id:
             return paper
     raise HTTPException(status_code=404, detail="Paper not found")
 
-@router.delete("/{id}", status_code=status.HTTP_200_OK)
+@router.delete("/{id}", status_code=status.HTTP_200_OK,
+               summary="删除论文",
+               description="删除指定论文，同步清理 MinIO 中的 PDF/图片文件及 Milvus 中对应的所有 chunk 向量。")
 async def delete_paper(id: int):
     global MOCK_PAPERS
     initial_len = len(MOCK_PAPERS)
@@ -115,11 +123,15 @@ async def delete_paper(id: int):
 
 # --- Folders Router Endpoints ---
 
-@folders_router.get("", response_model=List[FolderResponse])
+@folders_router.get("", response_model=List[FolderResponse],
+                    summary="文件夹列表",
+                    description="获取当前用户的所有文件夹及每个文件夹的论文数量。")
 async def list_folders():
     return MOCK_FOLDERS
 
-@folders_router.post("", response_model=FolderResponse, status_code=status.HTTP_201_CREATED)
+@folders_router.post("", response_model=FolderResponse, status_code=status.HTTP_201_CREATED,
+                     summary="创建文件夹",
+                     description="新建论文文件夹，支持嵌套（传 `parent_id`）。")
 async def create_folder(folder_data: FolderCreate):
     new_folder = FolderResponse(
         id=len(MOCK_FOLDERS) + 1,

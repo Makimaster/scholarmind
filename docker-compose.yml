@@ -81,12 +81,12 @@ services:
     depends_on: [etcd, minio]
 
   # ---------- 解析:参考文献结构化 ----------
-  # 仅 REFERENCE_PARSER_PROVIDER=grobid 时需要启动（镜像约 4GB）
-  # 默认用 LLM 解析参考文献，无需此容器；精度要求高时改为 grobid
-  grobid:
-    image: lfoppiano/grobid:0.8.1
-    container_name: sm_grobid
-    ports: ["8070:8070"]
+  # 仅 REFERENCE_PARSER_PROVIDER=grobid 时取消注释（镜像约 4GB）
+  # 默认 REFERENCE_PARSER_PROVIDER=llm，无需此容器
+  # grobid:
+  #   image: lfoppiano/grobid:0.8.1
+  #   container_name: sm_grobid
+  #   ports: ["8070:8070"]
 
   # ---------- Embedding 推理 (TEI) ----------
   # 使用云 API 时注释掉此块 (EMBEDDING_PROVIDER=dashscope/openai)
@@ -143,7 +143,7 @@ services:
       # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
       # - D:/your/models:/models
     command: ["python", "-m", "app.worker.main"]   # 启动 RQ worker
-    depends_on: [redis, mysql, milvus, minio, grobid]
+    depends_on: [redis, mysql, milvus, minio]
 
 networks:
   default:

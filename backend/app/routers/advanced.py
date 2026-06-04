@@ -7,7 +7,15 @@ from app.schemas.advanced import ReviewGenerateRequest, CitationGraphResponse, C
 
 router = APIRouter(tags=["advanced"])
 
-@router.post("/review/generate")
+@router.post("/review/generate",
+             summary="Agentic 文献综述生成（SSE 流式）",
+             description="""基于 LlamaIndex ReActAgent 自动生成多文献综述。
+
+**流程**：Agent 将 topic 分解为 3-5 个子问题 → 对每个子问题调用混合检索 → 汇总生成结构化综述（引言/核心挑战/方法对比/结论）
+
+**SSE 事件格式** 同 `/chat/query`：cite → token → done
+
+**scope_type**：`all`=全库，`folder`=指定文件夹，`papers`=指定论文列表""")
 async def generate_review(request: ReviewGenerateRequest):
     # Streaming Response Generator for SSE review generation
     async def review_generator():
@@ -56,7 +64,9 @@ async def generate_review(request: ReviewGenerateRequest):
 
     return StreamingResponse(review_generator(), media_type="text/event-stream")
 
-@router.get("/graph/citations", response_model=CitationGraphResponse)
+@router.get("/graph/citations", response_model=CitationGraphResponse,
+            summary="论文引用关系图谱",
+            description="返回论文间的引用网络（节点+有向边），可指定 `paper_id` 只返回与该论文相关的子图。节点含标题/作者/年份，边含引用方向。前端用于渲染知识图谱可视化。")
 async def get_citation_graph(paper_id: Optional[int] = None):
     # Mock citation network graph
     nodes = [

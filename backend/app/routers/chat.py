@@ -63,7 +63,9 @@ MOCK_MESSAGES = {
     102: []
 }
 
-@router.post("/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/conversations", response_model=ConversationResponse, status_code=status.HTTP_201_CREATED,
+             summary="新建对话",
+             description="创建一个新的对话会话，可绑定文件夹或指定论文范围（`paper_ids`）。后续提问时带上 `conversation_id` 即可携带上下文记忆。")
 async def create_conversation(data: ConversationCreate):
     new_id = len(MOCK_CONVERSATIONS) + 101
     title = data.title or f"新会话 {new_id}"
@@ -79,17 +81,32 @@ async def create_conversation(data: ConversationCreate):
     MOCK_MESSAGES[new_id] = []
     return new_conv
 
-@router.get("/conversations", response_model=List[ConversationResponse])
+@router.get("/conversations", response_model=List[ConversationResponse],
+            summary="对话列表",
+            description="获取当前用户的所有对话会话，按更新时间倒序排列。")
 async def list_conversations():
     return MOCK_CONVERSATIONS
 
-@router.get("/conversations/{id}/messages", response_model=List[MessageResponse])
+@router.get("/conversations/{id}/messages", response_model=List[MessageResponse],
+            summary="对话历史消息",
+            description="获取指定会话的完整消息历史，每条 assistant 消息包含引用溯源信息（`citations`：论文ID、页码、bbox 坐标、原文片段）。")
 async def list_messages(id: int):
     if id in MOCK_MESSAGES:
         return MOCK_MESSAGES[id]
     return []
 
-@router.post("/query")
+@router.post("/query",
+             summary="论文问答（SSE 流式）",
+             description="""向已入库的论文提问，SSE 流式返回答案和引用。
+
+**流程**：意图路由 → 查询改写+翻译+HyDE → 混合检索（dense+sparse）→ RRF 融合 → Reranker 重排 → LLM 生成带角标答案
+
+**SSE 事件格式**：
+- `event: cite` — 引用块（paper_id / page_num / bbox / content / image_key）
+- `event: token` — 流式文字 delta
+- `event: done` — 结束，含 latency_ms
+
+**scope_type**：`all`=全库，`folder`=指定文件夹，`papers`=指定论文列表""")
 async def chat_query(request: ChatQueryRequest):
     # Streaming Response Generator for SSE
     async def sse_generator():
@@ -184,7 +201,9 @@ async def chat_query(request: ChatQueryRequest):
 
     return StreamingResponse(sse_generator(), media_type="text/event-stream")
 
-@router.post("/feedback", response_model=FeedbackResponse)
+@router.post("/feedback", response_model=FeedbackResponse,
+             summary="答案反馈（点赞/踩）",
+             description="对 assistant 回答进行正负反馈，数据写入 query_logs 用于后续质量分析。`is_positive=true` 为点赞，`false` 为踩，可附带原因说明。")
 async def message_feedback(data: FeedbackRequest):
     return FeedbackResponse(
         status="success",
