@@ -83,6 +83,8 @@ services:
     depends_on: [etcd, minio]
 
   # ---------- 解析:参考文献结构化 ----------
+  # 仅 REFERENCE_PARSER_PROVIDER=grobid 时需要启动（镜像约 4GB）
+  # 默认用 LLM 解析参考文献，无需此容器；精度要求高时改为 grobid
   grobid:
     image: lfoppiano/grobid:0.8.1
     container_name: sm_grobid

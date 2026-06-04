@@ -81,6 +81,9 @@ class Settings(BaseSettings):
 
     # Ingestion APIs
     MINERU_BASE_URL: str = "http://mineru:8000"
+
+    # Reference parser provider: llm (default, no extra container) | grobid (high accuracy, needs grobid ~4GB image)
+    REFERENCE_PARSER_PROVIDER: str = "llm"
     GROBID_BASE_URL: str = "http://grobid:8070"
 
     # Retrieval
