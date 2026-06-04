@@ -59,16 +59,14 @@ services:
 
   # ---------- Milvus 依赖:etcd ----------
   etcd:
-    image: bitnami/etcd:3.5                # quay.io/coreos/etcd 在国内被墙，改用 bitnami 镜像
+    image: quay.io/coreos/etcd:v3.5.0
     container_name: sm_etcd
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ALLOW_NONE_AUTHENTICATION=yes
-      - ETCD_ADVERTISE_CLIENT_URLS=http://127.0.0.1:2379
-      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
-    volumes: ["./data/etcd:/bitnami/etcd"]
+    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    volumes: ["./data/etcd:/etcd"]
 
   # ---------- 向量库 ----------
   milvus:
