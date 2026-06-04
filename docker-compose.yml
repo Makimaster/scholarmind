@@ -59,14 +59,16 @@ services:
 
   # ---------- Milvus 依赖:etcd ----------
   etcd:
-    image: quay.io/coreos/etcd:v3.5.5
+    image: bitnami/etcd:3.5                # quay.io/coreos/etcd 在国内被墙，改用 bitnami 镜像
     container_name: sm_etcd
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
       - ETCD_QUOTA_BACKEND_BYTES=4294967296
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
-    volumes: ["./data/etcd:/etcd"]
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://127.0.0.1:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+    volumes: ["./data/etcd:/bitnami/etcd"]
 
   # ---------- 向量库 ----------
   milvus:
@@ -86,21 +88,31 @@ services:
     container_name: sm_grobid
     ports: ["8070:8070"]
 
-  # ---------- Embedding 推理 (TEI;用云API则注释掉) ----------
-  embedding:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
-    container_name: sm_embedding
-    command: ["--model-id", "BAAI/bge-m3"]   # 换 Qwen3-Embedding 改这里
-    ports: ["8080:80"]
-    volumes: ["./data/models:/data"]
+  # ---------- Embedding 推理 (TEI) ----------
+  # 使用云 API 时注释掉此块 (EMBEDDING_PROVIDER=dashscope/openai)
+  # 使用本地推理时取消注释   (EMBEDDING_PROVIDER=local，.env 里 EMBEDDING_BASE_URL=http://embedding:80/v1)
+  # embedding:
+  #   image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+  #   container_name: sm_embedding
+  #   command: ["--model-id", "BAAI/bge-m3"]
+  #   environment:
+  #     - HF_ENDPOINT=https://hf-mirror.com
+  #     - HF_HUB_DISABLE_SYMLINKS_WARNING=1
+  #   ports: ["8080:80"]
+  #   volumes: ["./data/models:/data"]
 
   # ---------- Reranker 推理 (TEI) ----------
-  reranker:
-    image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
-    container_name: sm_reranker
-    command: ["--model-id", "BAAI/bge-reranker-v2-m3"]  # 换 Qwen3-Reranker 改这里
-    ports: ["8081:80"]
-    volumes: ["./data/models:/data"]
+  # 使用云 API 时注释掉此块 (RERANK_PROVIDER=dashscope)
+  # 使用本地推理时取消注释   (RERANK_PROVIDER=local，.env 里 RERANK_BASE_URL=http://reranker:80/rerank)
+  # reranker:
+  #   image: ghcr.io/huggingface/text-embeddings-inference:cpu-latest
+  #   container_name: sm_reranker
+  #   command: ["--model-id", "BAAI/bge-reranker-v2-m3"]
+  #   environment:
+  #     - HF_ENDPOINT=https://hf-mirror.com
+  #     - HF_HUB_DISABLE_SYMLINKS_WARNING=1
+  #   ports: ["8081:80"]
+  #   volumes: ["./data/models:/data"]
 
   # ---------- 后端 API ----------
   backend:
@@ -112,7 +124,9 @@ services:
     ports: ["8008:8000"]
     volumes:
       - ./backend:/app
-      - D:/your/models:/models
+      # 仅 EMBEDDING_PROVIDER=local_path 或 RERANK_PROVIDER=local_path 时需要:
+      # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
+      # - D:/your/models:/models
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on: [mysql, postgres, redis, minio, milvus]
 
@@ -125,7 +139,9 @@ services:
       - MYSQL_PORT=3306
     volumes:
       - ./backend:/app
-      - D:/your/models:/models
+      # 仅 EMBEDDING_PROVIDER=local_path 或 RERANK_PROVIDER=local_path 时需要:
+      # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
+      # - D:/your/models:/models
     command: ["python", "-m", "app.worker.main"]   # 启动 RQ worker
     depends_on: [redis, mysql, milvus, minio, grobid]
 

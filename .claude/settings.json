@@ -1,4 +1,11 @@
 {
+   "permissions": {
+    "allow": [
+      "Bash(pip *)",
+      "Bash(python *)",
+      "Bash(docker compose *)"
+    ]
+  },
   "hooks": {
     "PostToolUse": [
       {

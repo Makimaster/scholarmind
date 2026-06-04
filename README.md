@@ -34,7 +34,7 @@ cp frontend/.env.example frontend/.env
 cd frontend && npm install && npm run dev
 ```
 
-- 后端 API：http://localhost:8000/docs
+- 后端 API：http://localhost:8008/docs
 - 前端 UI：http://localhost:5173
 - MinIO 控制台：http://localhost:9001
 
@@ -52,10 +52,10 @@ cd frontend && npm install && npm run dev
 
 当前**项目基础设施编排**、**前后端代码骨架**以及**数据库初始化 SQL** 均已全部开发完成，并经语法和配置验证通过。
 
-项目成员可分工认领以下任务，在 2 日内完成核心业务逻辑对接：
+项目成员需完成以下任务，完成核心业务逻辑对接：
 
 ### 🏁 基础设施准备 (全员/运维)
-- [ ] 复制 `backend/.env.example` 为 `backend/.env`，填写实际的 `LLM_API_KEY`（如通义千问/DeepSeek 等 OpenAI 兼容接口键值）和 MinerU 的 `YOUR_PIPELINE_ID`。
+- [ ] 复制 `backend/.env.example` 为 `backend/.env`，填写实际的 `LLM_API_KEY`（如通义千问/DeepSeek 等 OpenAI 兼容接口键值）和 MEMBEDDING_API_KEY 和 RERANK_API_KEY 。
 - [ ] 启动本地 Docker 编排：`docker compose up -d --build`，确认全部容器正常运行。
 - [ ] 在 `frontend/` 目录下执行 `npm install` 安装新增 of `axios`, `pinia`, `vue-router` 依赖。
 

@@ -71,4 +71,3 @@ PDF上传 → MinIO存原文 → 建 ingest_task → 入 RQ 队列 (秒级响应
 | 19 | RAG-Fusion(RRF) | 在线④ | 🟢核心 |
 | 20 | 自适应检索 | ⓪路由 + ②两阶段(简单轻/复杂深) | 🔵选做 |
 
-> 覆盖约 18/20。embedding 一个模型同时产出 dense+sparse(+colbert)，一口气覆盖 7/9/10。
