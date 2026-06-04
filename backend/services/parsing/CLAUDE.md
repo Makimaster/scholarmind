@@ -6,7 +6,7 @@
 | 步骤 | 工具 | 产物 |
 |---|---|---|
 | 版面解析 | MinerU (HTTP `MINERU_BASE_URL`) | 双栏正文、公式→LaTeX、表→HTML、抠图 |
-| 文献结构化 | GROBID (HTTP `GROBID_BASE_URL`) | 标题/作者/摘要/章节/参考文献 |
+| 文献结构化 | LLM（默认）/ GROBID（可选，精度更高但镜像 ~4GB） | 参考文献列表 → MySQL `citations` 表；通过 `REFERENCE_PARSER_PROVIDER=llm|grobid` 切换 |
 | 图片描述 | VLM (clients/llm) | 图的中文描述（配合 figure_caption 提示词） |
 
 写入：`papers`（元数据）、`citations`（引用边）、`doc_blocks`（表/图/公式父块）、MinIO `figures`（图片）。

@@ -10,7 +10,7 @@ services:
     image: mysql:8.0
     container_name: sm_mysql
     environment:
-      MYSQL_ROOT_PASSWORD: change-me
+      MYSQL_ROOT_PASSWORD: "123456"
       MYSQL_DATABASE: scholarmind
     ports: ["3307:3306"]
     volumes:
@@ -27,7 +27,7 @@ services:
     image: postgres:16-alpine
     container_name: sm_postgres
     environment:
-      POSTGRES_PASSWORD: change-me
+      POSTGRES_PASSWORD: "123456"
       POSTGRES_DB: scholarmind_memory
     ports: ["5432:5432"]
     volumes:
