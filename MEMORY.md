@@ -12,6 +12,7 @@
 - [事实] **HNSW 是 ANN，不是全库扫** —— 分区内几百万向量也是亚线性图搜索，速度不是瓶颈；相关性收窄靠 `paper_id/folder_id/acl` scalar 过滤 + 大范围时两阶段文档路由，不是靠分区。
 - [坑] **大表别塞一个 chunk** —— 一张大表→一个向量语义被稀释。走小-大检索：摘要入库，命中后按 `block_id` 取 `doc_blocks` 整表喂 LLM。
 - [坑] **批量上传别用 BackgroundTasks** —— 进程重启任务丢、不能限并发。用 RQ：状态进 `ingest_tasks`，可关页面、可重试、可恢复。
+- [坑] **项目不能放在 exFAT / Removable 盘** —— Docker Desktop WSL2 后端只把 NTFS 固定盘挂进 `docker-desktop` distro，exFAT/Removable 盘会被跳过，所有 host bind mount 静默回退成空目录（`backend/` 容器内只剩残片，mysql/pg/etcd/minio init 全炸）。且 exFAT 无 POSIX 权限/inode/symlink，即使强挂 DB 数据目录也会坏。**项目必须放 NTFS 固定盘**（如 `C:\` 或 `D:\` 内置 SSD）。诊断命令：`wsl -d docker-desktop -- mount | grep 9p` 看有哪些盘被挂；`Get-Volume -DriveLetter <X>` 看 `DriveType`/`FileSystem`。
 
 ## 设计决策
 
