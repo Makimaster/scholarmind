@@ -65,14 +65,15 @@ async def _mark_failed(
         await _update_batch_counts(db, batch_id, user_id)
 
 
-async def _run_indexing_if_available(user_id: int, paper_id: int, db: AsyncSession) -> None:
-    try:
-        from services.indexing.indexer import index_paper
-    except ModuleNotFoundError:
-        logger.warning(f"[worker] indexing service not implemented, skipped paper_id={paper_id}")
-        return
-
-    await index_paper(user_id=user_id, paper_id=paper_id, db=db)
+async def _run_indexing(
+    user_id: int,
+    paper_id: int,
+    folder_id: int | None,
+    blocks: list,
+    db: AsyncSession,
+) -> None:
+    from services.indexing import index_paper
+    await index_paper(user_id=user_id, paper_id=paper_id, folder_id=folder_id, blocks=blocks, db=db)
 
 
 async def _handle_ingest_job_async(user_id: int, paper_id: int, pdf_key: str, task_id: int) -> None:
@@ -97,7 +98,7 @@ async def _handle_ingest_job_async(user_id: int, paper_id: int, pdf_key: str, ta
 
             paper_result = await db.execute(
                 text("""
-                    SELECT id, pdf_key
+                    SELECT id, pdf_key, folder_id
                     FROM papers
                     WHERE id = :paper_id AND user_id = :user_id
                     LIMIT 1
@@ -107,6 +108,7 @@ async def _handle_ingest_job_async(user_id: int, paper_id: int, pdf_key: str, ta
             paper = paper_result.mappings().first()
             if paper is None:
                 raise RuntimeError(f"paper not found: paper_id={paper_id} user_id={user_id}")
+            folder_id: int | None = paper["folder_id"]
 
             await db.execute(
                 text("""
@@ -119,7 +121,7 @@ async def _handle_ingest_job_async(user_id: int, paper_id: int, pdf_key: str, ta
             )
             await db.commit()
 
-            await parse_paper(user_id, paper_id, pdf_key or str(paper["pdf_key"]), db)
+            parse_result = await parse_paper(user_id, paper_id, pdf_key or str(paper["pdf_key"]), db)
 
             await db.execute(
                 text("""
@@ -131,7 +133,7 @@ async def _handle_ingest_job_async(user_id: int, paper_id: int, pdf_key: str, ta
             )
             await db.commit()
 
-            await _run_indexing_if_available(user_id, paper_id, db)
+            await _run_indexing(user_id, paper_id, folder_id, parse_result.blocks, db)
 
             await db.execute(
                 text("""
