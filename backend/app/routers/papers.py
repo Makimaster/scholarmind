@@ -1,17 +1,33 @@
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status
-from typing import List, Optional
 from datetime import datetime
-import uuid
-from app.schemas.papers import PaperResponse, PaperUploadResponse, PaperDetailResponse, FolderCreate, FolderResponse
+from pathlib import Path
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.schemas.papers import (
+    FolderCreate,
+    FolderResponse,
+    PaperDetailResponse,
+    PaperResponse,
+    PaperUploadResponse,
+)
+from common.clients.minio import upload_pdf
+from common.clients.redis import enqueue_ingest_task
+from common.db.mysql import get_mysql_session
 
 router = APIRouter(prefix="/papers", tags=["papers"])
 folders_router = APIRouter(prefix="/folders", tags=["folders"])
 
-# Mock In-Memory Databases
+MOCK_USER_ID = 999
+
+# Mock folder data remains until folder/list APIs are moved to MySQL.
 MOCK_FOLDERS = [
     FolderResponse(id=1, name="大语言模型 (LLM)", parent_id=None, paper_count=2, created_at=datetime.now()),
     FolderResponse(id=2, name="多模态与 VLM", parent_id=None, paper_count=0, created_at=datetime.now()),
-    FolderResponse(id=3, name="RAG 检索增强生成", parent_id=None, paper_count=3, created_at=datetime.now())
+    FolderResponse(id=3, name="RAG 检索增强生成", parent_id=None, paper_count=3, created_at=datetime.now()),
 ]
 
 MOCK_PAPERS = [
@@ -29,7 +45,7 @@ MOCK_PAPERS = [
         pages=15,
         created_at=datetime.now(),
         batch_id="batch-782a-4bc3",
-        meta_data={"citations_count": 98000, "publisher": "Google"}
+        meta_data={"citations_count": 98000, "publisher": "Google"},
     ),
     PaperDetailResponse(
         id=2,
@@ -37,7 +53,7 @@ MOCK_PAPERS = [
         authors="Lewis, Perez, Piktus, Petroni, Karpukhin, Goyal, Küttler, Lewis, Yih, Riedel, Kiela",
         journal="NeurIPS",
         year=2020,
-        abstract="We show that hybrid retrieval-augmented models outperform traditional parametric-only language models...",
+        abstract="We show that hybrid retrieval-augmented models outperform traditional parametric-only models...",
         folder_id=3,
         status="parsing",
         file_key="papers/rag_nlp.pdf",
@@ -45,54 +61,211 @@ MOCK_PAPERS = [
         pages=18,
         created_at=datetime.now(),
         batch_id="batch-591c-99d1",
-        meta_data={"citations_count": 3200, "publisher": "Meta AI"}
-    )
+        meta_data={"citations_count": 3200, "publisher": "Meta AI"},
+    ),
 ]
 
-# --- Papers Router Endpoints ---
 
-@router.post("/upload", response_model=PaperUploadResponse, status_code=status.HTTP_202_ACCEPTED,
-             summary="批量上传 PDF 论文",
-             description="上传一个或多个 PDF 文件，异步入库（202 立即返回）。返回 `batch_id` 和各文件对应的 `task_id`，通过 `/ingest/batches/{batch_id}` 轮询进度。")
-async def upload_papers(
-    files: List[UploadFile] = File(...),
-    folder_id: Optional[int] = Form(None)
-):
-    batch_id = f"batch-{uuid.uuid4().hex[:8]}"
-    task_ids = [f"task-{uuid.uuid4().hex[:12]}" for _ in files]
-    
-    # Save upload state into mock database (for list query)
-    for idx, f in enumerate(files):
-        new_paper = PaperDetailResponse(
-            id=len(MOCK_PAPERS) + 1,
-            title=f.filename.replace(".pdf", ""),
-            authors="待解析",
-            journal=None,
-            year=None,
-            abstract="排队解析中...",
-            folder_id=folder_id,
-            status="pending",
-            file_key=f"papers/{f.filename}",
-            file_size=123456,  # Mock size
-            pages=0,
-            created_at=datetime.now(),
-            batch_id=batch_id,
-            meta_data={}
-        )
-        MOCK_PAPERS.append(new_paper)
+async def _get_existing_paper(db: AsyncSession, user_id: int, file_hash: str):
+    result = await db.execute(
+        text("""
+            SELECT id, pdf_key, status
+            FROM papers
+            WHERE user_id = :user_id AND file_hash = :file_hash
+            LIMIT 1
+        """),
+        {"user_id": user_id, "file_hash": file_hash},
+    )
+    return result.mappings().first()
 
-    return PaperUploadResponse(
-        batch_id=batch_id,
-        tasks=task_ids
+
+async def _create_paper(
+    db: AsyncSession,
+    user_id: int,
+    folder_id: int | None,
+    filename: str,
+    file_hash: str,
+) -> int:
+    title = Path(filename).stem or filename
+    result = await db.execute(
+        text("""
+            INSERT INTO papers (user_id, folder_id, title, file_hash, pdf_key, status)
+            VALUES (:user_id, :folder_id, :title, :file_hash, :pdf_key, 'pending')
+        """),
+        {
+            "user_id": user_id,
+            "folder_id": folder_id,
+            "title": title,
+            "file_hash": file_hash,
+            "pdf_key": "pending",
+        },
+    )
+    paper_id = result.lastrowid
+    pdf_key = f"{user_id}/{paper_id}/original.pdf"
+    await db.execute(
+        text("""
+            UPDATE papers
+            SET pdf_key = :pdf_key
+            WHERE user_id = :user_id AND id = :paper_id
+        """),
+        {"user_id": user_id, "paper_id": paper_id, "pdf_key": pdf_key},
+    )
+    return int(paper_id)
+
+
+async def _create_task(
+    db: AsyncSession,
+    batch_id: int,
+    user_id: int,
+    paper_id: int,
+    filename: str,
+    file_hash: str,
+    stage: str,
+    progress: int,
+) -> int:
+    result = await db.execute(
+        text("""
+            INSERT INTO ingest_tasks
+                (batch_id, user_id, paper_id, file_name, file_hash, stage, progress)
+            VALUES
+                (:batch_id, :user_id, :paper_id, :file_name, :file_hash, :stage, :progress)
+        """),
+        {
+            "batch_id": batch_id,
+            "user_id": user_id,
+            "paper_id": paper_id,
+            "file_name": filename,
+            "file_hash": file_hash,
+            "stage": stage,
+            "progress": progress,
+        },
+    )
+    return int(result.lastrowid)
+
+
+async def _update_batch_counts(db: AsyncSession, batch_id: int, user_id: int) -> None:
+    await db.execute(
+        text("""
+            UPDATE ingest_batches b
+            SET
+                done = (
+                    SELECT COUNT(*) FROM ingest_tasks t
+                    WHERE t.batch_id = b.id AND t.user_id = b.user_id AND t.stage = 'done'
+                ),
+                failed = (
+                    SELECT COUNT(*) FROM ingest_tasks t
+                    WHERE t.batch_id = b.id AND t.user_id = b.user_id AND t.stage = 'failed'
+                ),
+                status = CASE
+                    WHEN (
+                        SELECT COUNT(*) FROM ingest_tasks t
+                        WHERE t.batch_id = b.id AND t.user_id = b.user_id
+                          AND t.stage IN ('done', 'failed')
+                    ) >= b.total THEN 'done'
+                    ELSE 'running'
+                END
+            WHERE b.id = :batch_id AND b.user_id = :user_id
+        """),
+        {"batch_id": batch_id, "user_id": user_id},
     )
 
-@router.get("", response_model=List[PaperResponse],
-            summary="论文列表",
-            description="获取当前用户的论文列表，支持按文件夹（`folder_id`）和解析状态（`pending/parsing/indexing/completed/failed`）过滤。")
-async def list_papers(
-    folder_id: Optional[int] = None,
-    status: Optional[str] = None
+
+@router.post(
+    "/upload",
+    response_model=PaperUploadResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="批量上传 PDF 论文",
+    description="上传一个或多个 PDF 文件，异步入库（202 立即返回）。返回 `batch_id` 和各文件对应的 `task_id`，通过 `/ingest/batches/{batch_id}` 轮询进度。",
+)
+async def upload_papers(
+    files: List[UploadFile] = File(...),
+    folder_id: Optional[int] = Form(None),
+    db: AsyncSession = Depends(get_mysql_session),
 ):
+    if not files:
+        raise HTTPException(status_code=400, detail="No files uploaded")
+
+    user_id = MOCK_USER_ID
+    batch_result = await db.execute(
+        text("""
+            INSERT INTO ingest_batches (user_id, total, done, failed, status)
+            VALUES (:user_id, :total, 0, 0, 'running')
+        """),
+        {"user_id": user_id, "total": len(files)},
+    )
+    batch_id = int(batch_result.lastrowid)
+    task_ids: list[str] = []
+    queued_jobs: list[tuple[int, int, str, int]] = []
+
+    try:
+        for uploaded_file in files:
+            filename = uploaded_file.filename or "paper.pdf"
+            if not filename.lower().endswith(".pdf"):
+                raise HTTPException(status_code=400, detail=f"Only PDF files are supported: {filename}")
+
+            data = await uploaded_file.read()
+            if not data.startswith(b"%PDF"):
+                raise HTTPException(status_code=400, detail=f"Invalid PDF file: {filename}")
+
+            try:
+                import xxhash
+            except ModuleNotFoundError as exc:
+                raise HTTPException(status_code=500, detail="xxhash dependency is not installed") from exc
+            file_hash = xxhash.xxh64(data).hexdigest()
+            existing = await _get_existing_paper(db, user_id, file_hash)
+
+            if existing is None:
+                try:
+                    async with db.begin_nested():
+                        paper_id = await _create_paper(db, user_id, folder_id, filename, file_hash)
+                except IntegrityError:
+                    existing = await _get_existing_paper(db, user_id, file_hash)
+                    if existing is None:
+                        raise
+                    paper_id = int(existing["id"])
+                    pdf_key = str(existing["pdf_key"])
+                    paper_status = str(existing["status"])
+                else:
+                    pdf_key = await upload_pdf(user_id, paper_id, data)
+                    paper_status = "pending"
+            else:
+                paper_id = int(existing["id"])
+                pdf_key = str(existing["pdf_key"])
+                paper_status = str(existing["status"])
+
+            if paper_status == "done":
+                task_id = await _create_task(
+                    db, batch_id, user_id, paper_id, filename, file_hash, "done", 100
+                )
+            else:
+                task_id = await _create_task(
+                    db, batch_id, user_id, paper_id, filename, file_hash, "queued", 0
+                )
+                queued_jobs.append((user_id, paper_id, pdf_key, task_id))
+
+            task_ids.append(str(task_id))
+
+        await _update_batch_counts(db, batch_id, user_id)
+        await db.commit()
+        for job_user_id, job_paper_id, job_pdf_key, job_task_id in queued_jobs:
+            enqueue_ingest_task(job_user_id, job_paper_id, job_pdf_key, job_task_id)
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    return PaperUploadResponse(batch_id=str(batch_id), tasks=task_ids)
+
+
+@router.get(
+    "",
+    response_model=List[PaperResponse],
+    summary="论文列表",
+    description="获取当前用户的论文列表，支持按文件夹（`folder_id`）和解析状态（`pending/parsing/indexing/completed/failed`）过滤。",
+)
+async def list_papers(folder_id: Optional[int] = None, status: Optional[str] = None):
     results = MOCK_PAPERS
     if folder_id is not None:
         results = [p for p in results if p.folder_id == folder_id]
@@ -100,18 +273,26 @@ async def list_papers(
         results = [p for p in results if p.status == status]
     return results
 
-@router.get("/{id}", response_model=PaperDetailResponse,
-            summary="论文详情",
-            description="获取单篇论文的完整信息，包含标题、作者、摘要、解析状态、MinIO 文件路径及附加元数据。")
+
+@router.get(
+    "/{id}",
+    response_model=PaperDetailResponse,
+    summary="论文详情",
+    description="获取单篇论文的完整信息，包含标题、作者、摘要、解析状态、MinIO 文件路径及附加元数据。",
+)
 async def get_paper_detail(id: int):
     for paper in MOCK_PAPERS:
         if paper.id == id:
             return paper
     raise HTTPException(status_code=404, detail="Paper not found")
 
-@router.delete("/{id}", status_code=status.HTTP_200_OK,
-               summary="删除论文",
-               description="删除指定论文，同步清理 MinIO 中的 PDF/图片文件及 Milvus 中对应的所有 chunk 向量。")
+
+@router.delete(
+    "/{id}",
+    status_code=status.HTTP_200_OK,
+    summary="删除论文",
+    description="删除指定论文，同步清理 MinIO 中的 PDF/图片文件及 Milvus 中对应的所有 chunk 向量。",
+)
 async def delete_paper(id: int):
     global MOCK_PAPERS
     initial_len = len(MOCK_PAPERS)
@@ -121,24 +302,30 @@ async def delete_paper(id: int):
     raise HTTPException(status_code=404, detail="Paper not found")
 
 
-# --- Folders Router Endpoints ---
-
-@folders_router.get("", response_model=List[FolderResponse],
-                    summary="文件夹列表",
-                    description="获取当前用户的所有文件夹及每个文件夹的论文数量。")
+@folders_router.get(
+    "",
+    response_model=List[FolderResponse],
+    summary="文件夹列表",
+    description="获取当前用户的所有文件夹及每个文件夹的论文数量。",
+)
 async def list_folders():
     return MOCK_FOLDERS
 
-@folders_router.post("", response_model=FolderResponse, status_code=status.HTTP_201_CREATED,
-                     summary="创建文件夹",
-                     description="新建论文文件夹，支持嵌套（传 `parent_id`）。")
+
+@folders_router.post(
+    "",
+    response_model=FolderResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="创建文件夹",
+    description="新建论文文件夹，支持嵌套（传 `parent_id`）。",
+)
 async def create_folder(folder_data: FolderCreate):
     new_folder = FolderResponse(
         id=len(MOCK_FOLDERS) + 1,
         name=folder_data.name,
         parent_id=folder_data.parent_id,
         paper_count=0,
-        created_at=datetime.now()
+        created_at=datetime.now(),
     )
     MOCK_FOLDERS.append(new_folder)
     return new_folder
