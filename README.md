@@ -61,8 +61,8 @@ cd frontend && npm install && npm run dev
 
 ### 📁 任务 1：解析服务对接 (`backend/services/parsing`)
 - [ ] **MinerU API 对接**：在 `parsing` 逻辑中，使用已安装的 `mineru-kie-sdk` 中的 `MineruKIEClient`，上传 PDF，轮询获取双栏正文、公式 (LaTeX)、表格 (HTML) 和抠出的图。
-- [ ] **参考文献提取（LLM 方式）**：使用 LLM 配合 `prompts/extract_references.md` 提示词从论文文本中提取参考文献列表，写入 MySQL `citations` 表。（GROBID 方式精度更高但镜像 ~4GB，待后期按需启用：设 `REFERENCE_PARSER_PROVIDER=grobid` 并取消 docker-compose 中 grobid 容器注释）
-- [ ] **VLM 图片描述**：将抠图上传至 MinIO `figures` bucket，调用 `qwen3-vl` (配合 `figure_caption.md` 提示词) 生成中文图像描述。
+- [ ] **参考文献提取（LLM 方式）**：使用 LLM 配合 `prompts/extract_references.md` 提示词从论文文本中提取参考文献列表，写入 MySQL `citations` 表。
+- [ ] **VLM 图片描述**：将抠图上传至 MinIO `figures` bucket，调用 `qwen3.7-vlm` (配合 `figure_caption.md` 提示词) 生成中文图像描述。
 - [ ] **数据归一化入库**：将 MinerU 解析出的全部 block 写入 MySQL `doc_blocks` 表，并更新 `papers` 状态。
 
 ### 📁 任务 2：切分与向量化入库 (`backend/services/indexing`)
