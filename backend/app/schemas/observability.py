@@ -1,15 +1,33 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
+
 
 class QueryLogResponse(BaseModel):
     id: int
     user_id: int
     question: str
-    answer_snippet: str
+    rewritten_query: Optional[str] = None
+    retrieved_chunk_ids: List[str] = []
     latency_ms: int
-    tokens_used: int
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    feedback: Optional[int] = None
     created_at: datetime
+
+
+class IngestionTaskResponse(BaseModel):
+    id: int
+    paper_id: Optional[int] = None
+    title: str
+    file_name: str
+    status: str
+    stage: str
+    progress: int
+    error_msg: Optional[str] = None
+    started_at: Optional[datetime] = None
+    created_at: datetime
+
 
 class AccessLogResponse(BaseModel):
     id: int
@@ -19,6 +37,7 @@ class AccessLogResponse(BaseModel):
     status_code: int
     ip_address: str
     created_at: datetime
+
 
 class StatsOverviewResponse(BaseModel):
     paper_count: int

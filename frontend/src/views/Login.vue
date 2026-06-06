@@ -64,10 +64,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
+import { reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { useAuthStore } from '../stores/auth';
-// import api from '../api';
 
 const router = useRouter();
 const authStore = useAuthStore();
@@ -85,22 +84,14 @@ const form = reactive({
 async function handleSubmit() {
   loading.value = true;
   errorMsg.value = '';
-  
+
   try {
     if (isLogin.value) {
-      // Simulate API call for login
-      // const res = await api.post('/api/auth/login', { username: form.username, password: form.password });
-      // authStore.setToken(res.data.access_token);
-      
-      // Temporary mock token for skeleton
-      authStore.setToken('mock-jwt-token-scholarmind');
-      router.push('/library');
+      await authStore.login(form.username, form.password);
     } else {
-      // Simulate API call for register
-      // await api.post('/api/auth/register', form);
-      isLogin.value = true;
-      errorMsg.value = '注册成功，请使用新账号登录！';
+      await authStore.register(form.username, form.email, form.password);
     }
+    router.push('/library');
   } catch (error: any) {
     errorMsg.value = error.response?.data?.detail || '操作失败，请稍后重试';
   } finally {
