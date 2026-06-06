@@ -130,3 +130,70 @@ def _delete_by_paper_sync(user_id: int, paper_id: int) -> None:
 
 async def delete_by_paper(user_id: int, paper_id: int) -> None:
     await asyncio.to_thread(_delete_by_paper_sync, user_id, paper_id)
+
+
+DEFAULT_CHUNK_OUTPUT_FIELDS = [
+    "id",
+    "content_en",
+    "content_zh",
+    "user_id",
+    "paper_id",
+    "folder_id",
+    "chunk_type",
+    "section",
+    "page_num",
+    "bbox",
+    "block_id",
+    "image_key",
+]
+
+
+def _dense_search_sync(
+    vector: list[float],
+    filter_expr: str,
+    limit: int,
+    output_fields: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    if "user_id" not in filter_expr:
+        raise ValueError("Milvus search filter must include user_id")
+
+    _ensure_collection_sync()
+    client = get_milvus_client()
+    results = client.search(
+        collection_name=settings.MILVUS_COLLECTION,
+        data=[vector],
+        anns_field="dense_vec",
+        search_params={"metric_type": settings.MILVUS_METRIC, "params": {"ef": 64}},
+        filter=filter_expr,
+        limit=limit,
+        output_fields=output_fields or DEFAULT_CHUNK_OUTPUT_FIELDS,
+    )
+
+    hits: list[dict[str, Any]] = []
+    for hit in results[0] if results else []:
+        if isinstance(hit, dict):
+            entity = hit.get("entity", {}) or {}
+            hit_id = hit.get("id") or entity.get("id")
+            score = hit.get("score", hit.get("distance", 0.0))
+        else:
+            entity = getattr(hit, "entity", None) or {}
+            hit_id = getattr(hit, "id", None) or getattr(entity, "get", lambda _key, _default=None: _default)("id")
+            score = getattr(hit, "score", None)
+            if score is None:
+                score = getattr(hit, "distance", 0.0)
+
+        record = dict(entity)
+        record["id"] = str(hit_id or record.get("id", ""))
+        record["score"] = float(score or 0.0)
+        hits.append(record)
+    return hits
+
+
+async def dense_search(
+    vector: list[float],
+    filter_expr: str,
+    limit: int,
+    output_fields: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Run tenant-safe dense vector search over indexed Milvus chunks."""
+    return await asyncio.to_thread(_dense_search_sync, vector, filter_expr, limit, output_fields)

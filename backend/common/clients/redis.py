@@ -1,3 +1,7 @@
+import asyncio
+import json
+from typing import Any
+
 from redis import Redis
 from rq import Queue, Retry
 
@@ -41,3 +45,19 @@ def enqueue_ingest_task(user_id: int, paper_id: int, pdf_key: str, task_id: int)
         retry=Retry(max=2, interval=[60, 300]),
     )
     return job.id
+
+
+async def redis_get_json(key: str) -> Any | None:
+    """Read a JSON value from Redis without blocking the event loop."""
+    data = await asyncio.to_thread(get_redis().get, key)
+    if data is None:
+        return None
+    if isinstance(data, bytes):
+        data = data.decode("utf-8")
+    return json.loads(data)
+
+
+async def redis_set_json(key: str, value: Any, ttl: int) -> None:
+    """Write a JSON value to Redis without blocking the event loop."""
+    payload = json.dumps(value, ensure_ascii=False)
+    await asyncio.to_thread(get_redis().setex, key, ttl, payload)
