@@ -18,7 +18,8 @@ from app.schemas.chat import (
     MessageResponse,
 )
 from common.db.pg import AsyncSessionLocal as PGSessionLocal
-from services.chat_agent.agent import DEFAULT_USER_ID, stream_chat_query
+from app.deps import CurrentUserId
+from services.chat_agent.agent import stream_chat_query
 from services.chat_agent.memory import get_or_create_conversation
 
 router = APIRouter(prefix="/chat", tags=["chat"])
@@ -43,9 +44,9 @@ def _citation_response(item: dict[str, Any]) -> CitationResponse:
     summary="新建对话",
     description="创建一个新的对话会话，可绑定文件夹或指定论文范围（当前 PG schema 暂不持久化 scope）。",
 )
-async def create_conversation(data: ConversationCreate):
+async def create_conversation(data: ConversationCreate, user_id: CurrentUserId = None):  # type: ignore[valid-type]
     conversation_id = await get_or_create_conversation(
-        DEFAULT_USER_ID,
+        user_id,
         data.title or "新会话",
         data.folder_id,
         data.paper_ids,
@@ -59,7 +60,7 @@ async def create_conversation(data: ConversationCreate):
                 WHERE id = :id AND user_id = :user_id
                 """
             ),
-            {"id": conversation_id, "user_id": DEFAULT_USER_ID},
+            {"id": conversation_id, "user_id": user_id},
         )
         row = result.mappings().first()
     if row is None:
@@ -80,7 +81,7 @@ async def create_conversation(data: ConversationCreate):
     summary="对话列表",
     description="获取当前用户的所有对话会话，按更新时间倒序排列。",
 )
-async def list_conversations():
+async def list_conversations(user_id: CurrentUserId = None):  # type: ignore[valid-type]
     async with PGSessionLocal() as session:
         result = await session.execute(
             text(
@@ -91,7 +92,7 @@ async def list_conversations():
                 ORDER BY updated_at DESC, id DESC
                 """
             ),
-            {"user_id": DEFAULT_USER_ID},
+            {"user_id": user_id},
         )
         rows = result.mappings().all()
     return [
@@ -150,15 +151,15 @@ async def list_messages(id: int):
     summary="论文问答（SSE 流式）",
     description="意图路由 → RAG/Agent → cite/token/done SSE 输出，并在生成完成后落盘。",
 )
-async def chat_query(request: ChatQueryRequest):
+async def chat_query(request: ChatQueryRequest, user_id: CurrentUserId = None):  # type: ignore[valid-type]
     return StreamingResponse(
         stream_chat_query(
             question=request.question,
+            user_id=user_id,
             conversation_id=request.conversation_id,
             scope_type=request.scope_type,
             folder_id=request.folder_id,
             paper_ids=request.paper_ids,
-            user_id=DEFAULT_USER_ID,
         ),
         media_type="text/event-stream",
     )

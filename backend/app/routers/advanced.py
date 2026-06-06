@@ -6,7 +6,8 @@ from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
 
 from app.schemas.advanced import CitationEdge, CitationGraphResponse, CitationNode, ReviewGenerateRequest
-from services.chat_agent.agent import DEFAULT_USER_ID, build_scope
+from app.deps import CurrentUserId
+from services.chat_agent.agent import build_scope
 from services.chat_agent.reviewer import generate_review as generate_review_stream
 
 router = APIRouter(tags=["advanced"])
@@ -17,10 +18,10 @@ router = APIRouter(tags=["advanced"])
     summary="Agentic 文献综述生成（SSE 流式）",
     description="基于子问题分解与混合检索生成多文献综述，SSE 事件格式：cite → token → done。",
 )
-async def generate_review(request: ReviewGenerateRequest):
-    scope = build_scope(DEFAULT_USER_ID, request.scope_type, request.folder_id, request.paper_ids)
+async def generate_review(request: ReviewGenerateRequest, user_id: CurrentUserId = None):  # type: ignore[valid-type]
+    scope = build_scope(user_id, request.scope_type, request.folder_id, request.paper_ids)
     return StreamingResponse(
-        generate_review_stream(request.topic, scope, DEFAULT_USER_ID),
+        generate_review_stream(request.topic, scope, user_id),
         media_type="text/event-stream",
     )
 

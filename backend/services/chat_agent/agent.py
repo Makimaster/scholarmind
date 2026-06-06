@@ -165,11 +165,11 @@ async def _rag_answer(question: str, history: list[dict[str, str]], scope: Retri
 async def stream_chat_query(
     *,
     question: str,
+    user_id: int,
     conversation_id: int,
     scope_type: str = "all",
     folder_id: int | None = None,
     paper_ids: list[int] | None = None,
-    user_id: int = DEFAULT_USER_ID,
 ) -> AsyncGenerator[str, None]:
     started = time.perf_counter()
     history = await memory.get_history(conversation_id, limit=10)
@@ -220,7 +220,6 @@ async def stream_chat_query(
 
 
 __all__ = [
-    "DEFAULT_USER_ID",
     "build_scope",
     "chunks_to_citations",
     "chunks_to_context",

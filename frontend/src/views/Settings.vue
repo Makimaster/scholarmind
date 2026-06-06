@@ -170,6 +170,7 @@
 <script setup lang="ts">
 import { ref, reactive } from 'vue';
 import { useRouter } from 'vue-router';
+import { settingsApi } from '../api';
 import { useAuthStore } from '../stores/auth';
 
 const router = useRouter();
@@ -204,11 +205,11 @@ function handleLogout() {
 
 async function saveSettings() {
   saving.value = true;
-  // Simulate API save
-  setTimeout(() => {
+  try {
+    await settingsApi.save(config as unknown as Record<string, unknown>);
+  } finally {
     saving.value = false;
-    alert('全局 RAG 策略与模型参数已保存，修改即刻对后续查询生效！');
-  }, 800);
+  }
 }
 </script>
 

@@ -94,8 +94,27 @@ export const paperApi = {
     const { data } = await api.get('/papers', { params });
     return data;
   },
+  async delete(id: number) {
+    const { data } = await api.delete(`/papers/${id}`);
+    return data;
+  },
   async progress(batchId: number | string) {
     const { data } = await api.get(`/ingest/batches/${batchId}`);
+    return data;
+  },
+};
+
+export const foldersApi = {
+  async list() {
+    const { data } = await api.get('/folders');
+    return data;
+  },
+  async create(payload: { name: string; parent_id?: number | null }) {
+    const { data } = await api.post('/folders', payload);
+    return data;
+  },
+  async delete(id: number) {
+    const { data } = await api.delete(`/folders/${id}`);
     return data;
   },
 };
