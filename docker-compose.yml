@@ -124,6 +124,7 @@ services:
     ports: ["8008:8000"]
     volumes:
       - ./backend:/app
+      - ./prompts:/prompts
       # 仅 EMBEDDING_PROVIDER=local_path 或 RERANK_PROVIDER=local_path 时需要:
       # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
       # - D:/your/models:/models
@@ -139,9 +140,10 @@ services:
       - MYSQL_PORT=3306
     volumes:
       - ./backend:/app
+      - ./prompts:/prompts
       # 仅 EMBEDDING_PROVIDER=local_path 或 RERANK_PROVIDER=local_path 时需要:
       # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
-      # - D:/your/models:/models
+      # - D:/your:/models
     command: ["python", "-m", "app.worker.main"]   # 启动 RQ worker
     depends_on: [redis, mysql, milvus, minio]
 
