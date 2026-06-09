@@ -8,7 +8,7 @@ docker compose up -d --build
 docker compose ps                         # 确认全部 healthy
 ```
 
-启动的容器：mysql(3306) · postgres(5432) · redis(6379) · minio(9000/9001) · etcd · milvus(19530) · grobid(8070) · mineru(8001) · embedding(8080) · reranker(8081) · backend(8000) · worker。
+启动的容器：mysql(3306) · postgres(5432) · redis(6379) · minio(9000/9001) · etcd · milvus(19530) · grobid(8070) · backend(8000) · worker。Docling 在 worker 容器内本地运行。
 
 ## 前端本地跑（联调方便）
 
@@ -29,8 +29,8 @@ cd frontend && npm install && npm run dev   # http://localhost:5173
 docker compose logs -f backend        # 后端日志
 docker compose logs -f worker         # 入库任务日志
 docker compose restart backend        # 改代码后重启
-docker compose down                   # 停止 (保留数据)
-docker compose down -v                # 停止并清空数据卷(慎用)
+docker compose down                   # 停止容器，保留 ./data/* 数据
+# 注意：本项目使用 ./data/* bind mount，down -v 不会清空这些目录；全量重置需先 down 再删除 ./data/mysql 等子目录。
 ```
 
 ## 模型切换
@@ -40,6 +40,6 @@ docker compose down -v                # 停止并清空数据卷(慎用)
 
 ## 资源提示
 
-- MinerU 有 GPU 快很多（compose 里有 GPU 配置注释，打开即用）。
+- Docling 在 worker 内本地解析 PDF，首次运行可能下载模型/产物；缓存挂载在 `./data/docling-cache`。
 - Milvus + ES 类组件吃内存，建议 Docker 分配 ≥ 8GB。
 - 首次拉镜像 + 下模型较慢，耐心等。

@@ -18,5 +18,5 @@
 ## 接口
 - `POST /api/chat/query`（SSE）；`POST /api/review/generate`（SSE，Agent 综述）。
 
-## 待开发任务 (TODO)
-- 意图路由；SSE 生成；多轮记忆读写；LlamaIndex Agent 综述/对比；引用图谱查询。
+## 当前状态与后续优化
+- 意图路由、SSE 生成、多轮记忆读写和 Agent 综述链路已接入真实服务；后续重点是提升引用图谱、答案质量评估和复杂综述体验。

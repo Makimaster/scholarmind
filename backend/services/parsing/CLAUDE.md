@@ -5,8 +5,8 @@
 ## 职责与产物
 | 步骤 | 工具 | 产物 |
 |---|---|---|
-| 版面解析 | Docling（默认，本地开源）/ MinerU（可选回退，`DOCUMENT_PARSER_PROVIDER=mineru`） | 双栏正文、公式、表格、图片块，尽量保留页码与 bbox |
-| 文献结构化 | LLM（默认）/ GROBID（可选，精度更高但镜像 ~4GB） | 参考文献列表 → MySQL `citations` 表；通过 `REFERENCE_PARSER_PROVIDER=llm|grobid` 切换 |
+| 版面解析 | Docling（默认，本地开源）/ MinerU（显式兼容回退） | 双栏正文、公式、表格、图片块，尽量保留页码与 bbox |
+| 文献结构化 | GROBID（默认）/ LLM（失败降级） | 标题、作者、摘要、年份、DOI、参考文献列表 → MySQL `papers` / `citations` 表 |
 | 图片描述 | VLM (clients/llm) | 图的中文描述（配合 figure_caption 提示词） |
 
 写入：`papers`（元数据）、`citations`（引用边）、`doc_blocks`（表/图/公式父块）、MinIO `figures`（图片）。
@@ -21,5 +21,5 @@
 ## 接口（被 worker 调用）
 - `parse_paper(user_id, paper_id, pdf_key) -> ParseResult`：解析一篇，落库落 MinIO，返回 block 列表给 indexing。
 
-## 待开发任务 (TODO)
-- Docling 为默认文档解析 Provider；MinerU 仅作为显式配置的兼容回退。
+## 当前状态与后续优化
+- Docling 为默认版面解析 Provider；GROBID 为默认元数据/参考文献解析 Provider；MinerU 仅作为显式配置的兼容回退。后续重点是按真实 PDF 样本优化公式识别、图片裁剪与 bbox 质量。

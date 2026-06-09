@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 后端：Python 3.11 + FastAPI(async) + SQLAlchemy + RQ(Redis 队列)
 - RAG：LlamaIndex（IngestionPipeline + MilvusVectorStore + Agent）
 - 模型（全走 OpenAI 兼容接口，版本在 `.env` 配）：Qwen3 系列 LLM / Qwen3-Embedding / Qwen3-Reranker / Qwen3-VL
-- 解析：Docling（正文/公式/表/图，本地开源解析）+ MinerU（可选回退）+ GROBID（参考文献结构化）
+- 解析：Docling（正文/公式/表/图，本地开源解析）+ GROBID（论文元数据/参考文献结构化）+ MinerU（可选回退）
 - 前端：Vue 3 + Vite + Pinia + Vue Router（本地 `npm run dev`，基础设施全 Docker）
 
 ## Do NOT introduce（除非明确要求，这些是踩过的坑/已定方案）

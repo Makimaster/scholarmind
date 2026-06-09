@@ -81,12 +81,11 @@ services:
     depends_on: [etcd, minio]
 
   # ---------- 解析:参考文献结构化 ----------
-  # 仅 REFERENCE_PARSER_PROVIDER=grobid 时取消注释（镜像约 4GB）
-  # 默认 REFERENCE_PARSER_PROVIDER=llm，无需此容器
-  # grobid:
-  #   image: lfoppiano/grobid:0.8.1
-  #   container_name: sm_grobid
-  #   ports: ["8070:8070"]
+  # 默认 REFERENCE_PARSER_PROVIDER=grobid，用于论文元数据与参考文献结构化
+  grobid:
+    image: lfoppiano/grobid:0.8.1
+    container_name: sm_grobid
+    ports: ["8070:8070"]
 
   # ---------- Embedding 推理 (TEI) ----------
   # 使用云 API 时注释掉此块 (EMBEDDING_PROVIDER=dashscope/openai)
@@ -130,7 +129,7 @@ services:
       # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
       # - D:/your/models:/models
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-    depends_on: [mysql, postgres, redis, minio, milvus]
+    depends_on: [mysql, postgres, redis, minio, milvus, grobid]
 
   # ---------- RQ Worker (批量解析索引) ----------
   worker:
@@ -147,7 +146,7 @@ services:
       # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
       # - D:/your:/models
     command: ["python", "-m", "app.worker.main"]   # 启动 RQ worker
-    depends_on: [redis, mysql, milvus, minio]
+    depends_on: [redis, mysql, milvus, minio, grobid]
 
 networks:
   default:

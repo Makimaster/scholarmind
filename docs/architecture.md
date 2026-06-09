@@ -25,7 +25,7 @@
 └──────┘ └────────────┘ └───────────┘ └───────────┘ └─────────┘
 
   worker(RQ): 消费 rq:queue:ingest，跑 parsing→indexing 全链路
-  外部解析: GROBID(8070) · MinerU(8001)   推理: embedding(8080) · reranker(8081)
+  外部解析: GROBID(8070)   本地解析: Docling(worker内)   推理: embedding(8080) · reranker(8081)
 ```
 
 ## 服务边界（单体多模块 + 独立 worker）
@@ -34,7 +34,7 @@
 
 | 服务 | 输入 | 输出 | 依赖 |
 |---|---|---|---|
-| **parsing** | PDF (MinIO) | doc_blocks + 论文元数据 + 引用边 (MySQL)，图片 (MinIO) | MinerU, GROBID, VLM |
+| **parsing** | PDF (MinIO) | doc_blocks + 论文元数据 + 引用边 (MySQL)，图片 (MinIO) | Docling, GROBID, VLM |
 | **indexing** | doc_blocks | Milvus chunks（双语+向量） | embedding 模型, Milvus |
 | **retrieval** | 用户 query + 作用域 | 重排后的 chunk 列表 | Milvus, reranker, LLM |
 | **chat_agent** | query + 会话 | 流式答案 + 引用 + 记忆 | retrieval, PG, LLM |
@@ -47,7 +47,7 @@
 
 ## 数据流向
 
-1. **入库**：前端上传 → backend 存 MinIO + 建 `ingest_tasks` + 入 RQ 队列（秒级响应）→ worker：MinerU/GROBID 解析 → 图入 MinIO、元数据/引用/父块入 MySQL → indexing：中文摘要 + 向量化 → 写 Milvus → 更新任务状态。
+1. **入库**：前端上传 → backend 存 MinIO + 建 `ingest_tasks` + 入 RQ 队列（秒级响应）→ worker：Docling 解析正文/表格/图片/页码/bbox，GROBID 抽取元数据与参考文献 → 图入 MinIO、元数据/引用/父块入 MySQL → indexing：中文摘要 + 向量化 → 写 Milvus → 更新任务状态。
 2. **问答**：前端提问 → 意图路由（闲聊直接答 / 知识走 RAG）→ retrieval（作用域过滤 + 混检 + RRF + 重排 + CorrectiveRAG）→ chat_agent 组装上下文 + LLM 流式生成 + 角标溯源 → 写 query_logs + PG messages。
 
 详见 [rag-pipeline.md](rag-pipeline.md)、[data-contracts.md](data-contracts.md)。

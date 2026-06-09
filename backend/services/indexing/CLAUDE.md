@@ -19,5 +19,5 @@
 ## 接口
 - `index_paper(user_id, paper_id, blocks)`：切分+增强+向量化+写 Milvus，回填 `papers.chunk_count`。
 
-## 待开发任务 (TODO)
-- 切分策略调优；双语增强；混合向量写入；collection 初始化与索引参数。
+## 当前状态与后续优化
+- 切分、双语增强、向量化和 Milvus 写入链路已接入；后续重点是切分策略调优、大表摘要质量和批量入库性能。

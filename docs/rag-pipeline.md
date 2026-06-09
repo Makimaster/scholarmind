@@ -5,8 +5,8 @@
 ```
 PDF上传 → MinIO存原文 → 建 ingest_task → 入 RQ 队列 (秒级响应,可关页面)
   worker 消费:
-  ① MinerU 解析: 双栏正文 + 公式→LaTeX + 表→HTML + 抠图
-  ② GROBID 解析: 标题/作者/摘要/章节/参考文献 → MySQL(papers, citations)
+  ① Docling 解析: 双栏正文 + 表格/图片块 + 页码/bbox（公式尽量保留为独立块或正文）
+  ② GROBID 解析: 标题/作者/摘要/年份/DOI/参考文献 → MySQL(papers, citations)
   ③ 图片: 存 MinIO → Qwen3-VL 生成图片描述
   ④ 切分: 按章节/语义; 表格/公式整块不切碎; 15-20% 重叠
   ⑤ 父块入库: 大表/图/公式完整内容 → MySQL doc_blocks (小-大检索的"大")

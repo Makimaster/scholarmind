@@ -625,17 +625,89 @@ async def _extract_refs_llm(blocks: list[Block]) -> list[dict]:
     return []
 
 
-async def _extract_refs_grobid(pdf_bytes: bytes) -> list[dict]:
+async def _extract_grobid_metadata_and_refs(pdf_bytes: bytes) -> tuple[dict[str, Any], list[dict]]:
     url = f"{settings.GROBID_BASE_URL}/api/processFulltextDocument"
     async with httpx.AsyncClient(timeout=120) as client:
         resp = await client.post(
             url,
             files={"input": ("paper.pdf", pdf_bytes, "application/pdf")},
-            data={"consolidateReferences": "0"},
+            data={"consolidateReferences": "0", "teiCoordinates": "ref"},
         )
         resp.raise_for_status()
 
-    return _parse_tei_references(resp.text)
+    return _parse_tei_metadata(resp.text), _parse_tei_references(resp.text)
+
+
+async def _extract_refs_grobid(pdf_bytes: bytes) -> list[dict]:
+    _, references = await _extract_grobid_metadata_and_refs(pdf_bytes)
+    return references
+
+
+def _find_first_text(root: ET.Element, paths: tuple[str, ...], ns: dict[str, str]) -> str:
+    for path in paths:
+        element = root.find(path, ns)
+        if element is not None and element.text:
+            return element.text.strip()
+    return ""
+
+
+def _tei_author_names(root: ET.Element, ns: dict[str, str]) -> list[str]:
+    authors: list[str] = []
+    for author in root.findall(".//tei:fileDesc/tei:sourceDesc//tei:analytic/tei:author", ns):
+        pers_name = author.find("tei:persName", ns)
+        if pers_name is None:
+            continue
+        forename = " ".join(item.text.strip() for item in pers_name.findall("tei:forename", ns) if item.text)
+        surname = pers_name.findtext("tei:surname", "", ns).strip()
+        name = f"{forename} {surname}".strip()
+        if name:
+            authors.append(name)
+    return authors
+
+
+def _parse_tei_metadata(tei_xml: str) -> dict[str, Any]:
+    ns = {"tei": "http://www.tei-c.org/ns/1.0"}
+    try:
+        root = ET.fromstring(tei_xml)
+    except ET.ParseError as e:
+        logger.warning(f"GROBID TEI metadata parse error: {e}")
+        return {}
+
+    title = _find_first_text(
+        root,
+        (
+            ".//tei:fileDesc/tei:titleStmt/tei:title[@type='main']",
+            ".//tei:fileDesc/tei:titleStmt/tei:title",
+            ".//tei:analytic/tei:title[@level='a']",
+            ".//tei:analytic/tei:title",
+        ),
+        ns,
+    )
+    abstract_parts = ["".join(element.itertext()).strip() for element in root.findall(".//tei:profileDesc/tei:abstract", ns)]
+    abstract = "\n".join(part for part in abstract_parts if part)
+    doi = _find_first_text(root, (".//tei:idno[@type='DOI']", ".//tei:idno[@type='doi']"), ns)
+    year_text = ""
+    date_el = root.find(".//tei:publicationStmt/tei:date", ns)
+    if date_el is None:
+        date_el = root.find(".//tei:monogr//tei:date", ns)
+    if date_el is not None:
+        year_text = date_el.get("when", "") or (date_el.text or "")
+    year = int(year_text[:4]) if year_text[:4].isdigit() else None
+    page_numbers = {
+        int(element.get("n"))
+        for element in root.findall(".//tei:pb", ns)
+        if element.get("n") and element.get("n", "").isdigit()
+    }
+    lang = root.get("{http://www.w3.org/XML/1998/namespace}lang")
+    return {
+        "title": title or None,
+        "abstract": abstract or None,
+        "authors": _tei_author_names(root, ns) or None,
+        "year": year,
+        "doi": doi or None,
+        "num_pages": max(page_numbers) if page_numbers else None,
+        "lang": lang,
+    }
 
 
 def _parse_tei_references(tei_xml: str) -> list[dict]:
@@ -648,7 +720,9 @@ def _parse_tei_references(tei_xml: str) -> list[dict]:
 
     refs = []
     for bibl in root.findall(".//tei:listBibl/tei:biblStruct", ns):
-        title_el = bibl.find(".//tei:title[@level='a']", ns) or bibl.find(".//tei:title", ns)
+        title_el = bibl.find(".//tei:title[@level='a']", ns)
+        if title_el is None:
+            title_el = bibl.find(".//tei:title", ns)
         title = title_el.text if title_el is not None and title_el.text else ""
 
         authors = []
@@ -702,7 +776,12 @@ async def parse_paper(
     vlm_task = asyncio.create_task(_describe_figures(blocks))
 
     if settings.REFERENCE_PARSER_PROVIDER == "grobid":
-        references = await _extract_refs_grobid(pdf_bytes)
+        try:
+            grobid_metadata, references = await _extract_grobid_metadata_and_refs(pdf_bytes)
+            metadata = {**metadata, **{key: value for key, value in grobid_metadata.items() if value not in (None, "", [])}}
+        except Exception as exc:  # noqa: BLE001 - reference parsing should not block document ingestion.
+            logger.warning(f"[parse] GROBID extraction failed, falling back to LLM references paper_id={paper_id}: {exc}")
+            references = await _extract_refs_llm(blocks)
     else:
         references = await _extract_refs_llm(blocks)
 

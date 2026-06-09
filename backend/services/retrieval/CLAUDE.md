@@ -20,5 +20,5 @@
 ## 接口
 - `retrieve(user_id, query, scope, top_k) -> list[Chunk]`：返回带 score 的 chunk（含 page/image/block_id）。
 
-## 待开发任务 (TODO)
-- 混检 + RRF 实现；reranker 对接；CorrectiveRAG 判级与重试；缓存层；两阶段路由。
+## 当前状态与后续优化
+- 查询优化、混合检索、RRF、重排、CorrectiveRAG 开关和缓存层已接入；后续重点是两阶段文档路由、召回评估和参数调优。

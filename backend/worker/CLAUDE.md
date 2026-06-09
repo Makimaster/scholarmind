@@ -17,5 +17,6 @@
 ## 启动
 `python -m app.worker.main`（compose 的 worker 容器命令）。
 
-## 待开发任务 (TODO)
-- RQ enqueue/worker 接线；任务状态机；重试与并发限制；进度回写。
+## 当前状态
+- RQ worker 已接入真实 ingest 队列，执行 `parse_paper` → `index_paper`。
+- 任务状态会回写 `ingest_tasks` / `ingest_batches`，失败会标记 `failed` 并记录错误信息。
