@@ -79,6 +79,13 @@ class Settings(BaseSettings):
     MINIO_BUCKET_FIG: str = "figures"
     MINIO_SECURE: bool = False
 
+    # Document parser
+    DOCUMENT_PARSER_PROVIDER: str = "docling"
+    DOCUMENT_PARSER_FALLBACK_PROVIDER: str = "none"
+    DOCLING_ARTIFACTS_PATH: str = "/root/.cache/docling"
+    DOCLING_ENABLE_OCR: bool = False
+    DOCLING_ENABLE_TABLE_STRUCTURE: bool = True
+
     # Ingestion APIs
     MINERU_BASE_URL: str = "http://mineru:8000"
     MINERU_PIPELINE_ID: str = ""

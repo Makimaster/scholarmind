@@ -18,7 +18,7 @@
 | 后端 | Python 3.11 + FastAPI (async) + SQLAlchemy + RQ |
 | RAG | LlamaIndex（IngestionPipeline + MilvusVectorStore + Agent）|
 | 模型 | Qwen3 系列（LLM / Embedding / Reranker / VL），OpenAI 兼容接口 |
-| 解析 | MinerU（正文/公式/表/图）+ GROBID（参考文献结构化）|
+| 解析 | Docling（正文/公式/表/图，本地开源解析）+ MinerU（可选回退）+ GROBID（参考文献结构化）|
 | 向量库 | Milvus 2.5（HNSW 索引 + user_id 分区）|
 | 业务库 | MySQL 8.0 |
 | 记忆库 | PostgreSQL 16 |
@@ -67,7 +67,7 @@ cd frontend && npm install && npm run dev
 
 ## 核心流程
 
-1. **PDF 解析** — MinerU 解析双栏论文（正文/公式/表格/图片），GROBID/LLM 提取参考文献
+1. **PDF 解析** — Docling 本地解析双栏论文（正文/公式/表格/图片，保留页码和 bbox），GROBID/LLM 提取参考文献
 2. **向量化入库** — 智能切分 + 中文摘要增强 + Embedding 写入 Milvus（含 HNSW 索引）
 3. **混合检-重排** — Query 改写 + 翻译 + HyDE → Dense/Sparse 双路召回 → RRF 融合 → Reranker 重排
 4. **对话生成** — 意图路由 → 检索/Agent → SSE 流式生成 → 角标溯源 → 持久化记忆

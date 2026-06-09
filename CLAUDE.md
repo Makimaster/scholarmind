@@ -19,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 后端：Python 3.11 + FastAPI(async) + SQLAlchemy + RQ(Redis 队列)
 - RAG：LlamaIndex（IngestionPipeline + MilvusVectorStore + Agent）
 - 模型（全走 OpenAI 兼容接口，版本在 `.env` 配）：Qwen3 系列 LLM / Qwen3-Embedding / Qwen3-Reranker / Qwen3-VL
-- 解析：MinerU（正文/公式/表/图）+ GROBID（参考文献结构化）
+- 解析：Docling（正文/公式/表/图，本地开源解析）+ MinerU（可选回退）+ GROBID（参考文献结构化）
 - 前端：Vue 3 + Vite + Pinia + Vue Router（本地 `npm run dev`，基础设施全 Docker）
 
 ## Do NOT introduce（除非明确要求，这些是踩过的坑/已定方案）
@@ -74,7 +74,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 | 目录 | 职责 |
 |---|---|
-| `backend/services/parsing` | MinerU/GROBID/VLM 解析，产物落 MinIO + MySQL |
+| `backend/services/parsing` | Docling/MinerU/GROBID/VLM 解析，产物落 MinIO + MySQL |
 | `backend/services/indexing` | 双语增强 + 向量化 + 写 Milvus |
 | `backend/services/retrieval` | 意图路由/混检/RRF/重排/CorrectiveRAG |
 | `backend/services/chat_agent` | 对话/记忆/Agent 综述/SSE，连 PostgreSQL |

@@ -20,6 +20,7 @@
 - [决策] 队列用 RQ 不用 Celery —— 项目已引入 Redis，RQ 是其延伸，并且心智与维护成本较低；架构留了换 Celery 的余地。
 - [决策] 意图路由是对话入口 —— 闲聊→直接 LLM 不检索；知识问题→RAG；复杂→Agent。省延迟、抑制幻觉（Self-RAG/自适应检索）。
 - [决策] 模型全走 OpenAI 兼容接口 + `.env` 配版本 —— 可一键切 Qwen3/DeepSeek/vLLM/Ollama，版本不绑死代码。
+- [决策] Docling 作为默认 PDF 解析 Provider，MinerU 仅保留显式配置回退 —— MinerU 云端 Pipeline 易受服务侧配置影响；Docling 本地解析优先恢复 `doc_blocks -> indexing -> chat` 链路，首版图像块可先保留 caption/page_num/bbox，`image_key` 后续按实际导图能力增强。
 
 ## 开发与协作规范
 

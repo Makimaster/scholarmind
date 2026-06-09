@@ -5,9 +5,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from collections import Counter
+import html
 import json
+import os
 import re
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -211,6 +215,367 @@ async def _mineru_to_blocks(raw_result: Any, user_id: int, paper_id: int) -> lis
     return blocks
 
 
+def _object_to_dict(value: Any) -> dict[str, Any]:
+    """Best-effort object-to-dict conversion for version-tolerant Docling adapters."""
+    if isinstance(value, dict):
+        return value
+    for method_name in ("model_dump", "dict"):
+        method = getattr(value, method_name, None)
+        if callable(method):
+            try:
+                result = method()
+                if isinstance(result, dict):
+                    return result
+            except Exception:
+                pass
+    raw = getattr(value, "__dict__", None)
+    return raw if isinstance(raw, dict) else {}
+
+
+def _value_from_any(value: Any, keys: tuple[str, ...], default: Any = None) -> Any:
+    data = _object_to_dict(value)
+    for key in keys:
+        if isinstance(data, dict) and data.get(key) not in (None, ""):
+            return data[key]
+        attr = getattr(value, key, None)
+        if attr not in (None, ""):
+            return attr
+    return default
+
+
+def _first_prov(item: Any) -> Any:
+    prov = _value_from_any(item, ("prov", "provenance", "provs"))
+    if isinstance(prov, list) and prov:
+        return prov[0]
+    return prov
+
+
+def _to_int(value: Any) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _to_float(value: Any) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _extract_docling_page_num(item: Any) -> int | None:
+    prov = _first_prov(item)
+    return _to_int(
+        _value_from_any(prov, ("page_no", "page_num", "page"))
+        or _value_from_any(item, ("page_no", "page_num", "page"))
+    )
+
+
+def _bbox_values(raw_bbox: Any) -> list[float] | None:
+    if raw_bbox is None:
+        return None
+    data = _object_to_dict(raw_bbox)
+    if isinstance(raw_bbox, (list, tuple)):
+        values = [_to_float(item) for item in raw_bbox]
+        return [item for item in values if item is not None]
+    if isinstance(data, dict):
+        key_sets = (
+            ("l", "t", "r", "b"),
+            ("left", "top", "right", "bottom"),
+            ("x0", "y0", "x1", "y1"),
+        )
+        for keys in key_sets:
+            values = [_to_float(data.get(key)) for key in keys]
+            if all(item is not None for item in values):
+                return [item for item in values if item is not None]
+    return None
+
+
+def _extract_docling_bbox(item: Any, page_num: int | None) -> list | None:
+    prov = _first_prov(item)
+    raw_bbox = _value_from_any(prov, ("bbox", "box", "coordinates", "coord")) or _value_from_any(
+        item, ("bbox", "box", "coordinates", "coord")
+    )
+    values = _bbox_values(raw_bbox)
+    if not values:
+        return None
+    if len(values) == 5:
+        return values
+    if len(values) >= 4:
+        return ([page_num] if page_num is not None else []) + values[:4]
+    return None
+
+
+def _docling_label(item: Any, fallback: str = "text") -> str:
+    value = _value_from_any(item, ("label", "type", "category", "name"), fallback)
+    return str(value or fallback).lower()
+
+
+def _docling_block_type(item: Any, source_key: str = "") -> str:
+    label = f"{source_key} {_docling_label(item)}".lower()
+    if any(token in label for token in ("table", "tabular")):
+        return "table"
+    if any(token in label for token in ("picture", "figure", "image", "chart")):
+        return "figure"
+    if any(token in label for token in ("formula", "equation")):
+        return "formula"
+    return "text"
+
+
+def _build_docling_ref_lookup(exported: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    lookup: dict[str, dict[str, Any]] = {}
+    for value in exported.values():
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            ref = item.get("self_ref") or item.get("ref") or item.get("id")
+            if ref:
+                lookup[str(ref)] = item
+    return lookup
+
+
+def _caption_from_refs(item: Any, ref_lookup: dict[str, dict[str, Any]]) -> str:
+    captions = _value_from_any(item, ("captions", "caption_refs"))
+    if not isinstance(captions, list):
+        direct = _value_from_any(item, ("caption",))
+        return str(direct or "")
+    parts: list[str] = []
+    for caption in captions:
+        ref = caption.get("$ref") if isinstance(caption, dict) else caption
+        referenced = ref_lookup.get(str(ref)) if ref is not None else None
+        text_value = _value_from_any(referenced or caption, ("text", "orig", "content", "caption"))
+        if text_value:
+            parts.append(str(text_value))
+    return "\n".join(parts)
+
+
+def _table_cells_to_html(data: Any) -> str:
+    table_data = _object_to_dict(data)
+    cells = table_data.get("table_cells") or table_data.get("cells")
+    if not isinstance(cells, list):
+        return ""
+    rows: dict[int, dict[int, str]] = {}
+    for cell in cells:
+        cell_data = _object_to_dict(cell)
+        row = _to_int(cell_data.get("start_row_offset_idx") or cell_data.get("row") or cell_data.get("row_idx"))
+        col = _to_int(cell_data.get("start_col_offset_idx") or cell_data.get("col") or cell_data.get("col_idx"))
+        if row is None or col is None:
+            continue
+        text_value = str(cell_data.get("text") or cell_data.get("content") or "")
+        rows.setdefault(row, {})[col] = text_value
+    if not rows:
+        return ""
+    lines = ["<table>"]
+    for row_index in sorted(rows):
+        lines.append("  <tr>")
+        for col_index in sorted(rows[row_index]):
+            lines.append(f"    <td>{html.escape(rows[row_index][col_index])}</td>")
+        lines.append("  </tr>")
+    lines.append("</table>")
+    return "\n".join(lines)
+
+
+def _docling_content_for_item(item: Any, block_type: str, ref_lookup: dict[str, dict[str, Any]]) -> str:
+    if block_type == "table":
+        for method_name in ("export_to_html", "export_to_markdown"):
+            method = getattr(item, method_name, None)
+            if callable(method):
+                try:
+                    rendered = method()
+                    if rendered:
+                        return str(rendered)
+                except Exception:
+                    pass
+        direct = _value_from_any(item, ("html", "markdown", "text", "orig", "content"))
+        if direct:
+            return str(direct)
+        table_data = _value_from_any(item, ("data", "table_data"))
+        return _table_cells_to_html(table_data)
+    if block_type == "figure":
+        caption = _caption_from_refs(item, ref_lookup)
+        if caption:
+            return caption
+        return str(_value_from_any(item, ("caption", "text", "orig", "content"), ""))
+    if block_type == "formula":
+        return str(_value_from_any(item, ("latex", "text", "orig", "content"), ""))
+    return str(_value_from_any(item, ("text", "orig", "content", "markdown"), ""))
+
+
+def _docling_top_level_items(exported: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    candidates: list[tuple[str, dict[str, Any]]] = []
+    for key in ("texts", "tables", "pictures", "figures", "formulas", "equations"):
+        value = exported.get(key)
+        if isinstance(value, list):
+            candidates.extend((key, item) for item in value if isinstance(item, dict))
+    return candidates
+
+
+def _docling_recursive_items(payload: Any) -> list[tuple[str, dict[str, Any]]]:
+    found: list[tuple[str, dict[str, Any]]] = []
+    if isinstance(payload, dict):
+        has_content = any(key in payload for key in ("text", "orig", "content", "html", "markdown", "data"))
+        has_type = any(key in payload for key in ("label", "type", "category"))
+        if has_content and has_type:
+            found.append((str(payload.get("label") or payload.get("type") or "item"), payload))
+        for value in payload.values():
+            found.extend(_docling_recursive_items(value))
+    elif isinstance(payload, list):
+        for item in payload:
+            found.extend(_docling_recursive_items(item))
+    return found
+
+
+def _docling_to_blocks(document: Any, exported: dict[str, Any], user_id: int, paper_id: int) -> list[Block]:
+    ref_lookup = _build_docling_ref_lookup(exported)
+    raw_items = _docling_top_level_items(exported) or _docling_recursive_items(exported)
+    blocks: list[Block] = []
+    seen: set[str] = set()
+    for index, (source_key, item) in enumerate(raw_items, start=1):
+        ref = str(item.get("self_ref") or item.get("id") or f"{source_key}:{index}")
+        if ref in seen:
+            continue
+        seen.add(ref)
+        block_type = _docling_block_type(item, source_key)
+        content = _docling_content_for_item(item, block_type, ref_lookup).strip()
+        if not content and block_type != "figure":
+            continue
+        page_num = _extract_docling_page_num(item)
+        bbox = _extract_docling_bbox(item, page_num)
+        if page_num is None or bbox is None:
+            logger.warning(f"[parse] Docling block missing page_num/bbox paper_id={paper_id} type={block_type}")
+        blocks.append(Block(block_type=block_type, content=content, page_num=page_num, bbox=bbox))
+
+    blocks.sort(key=lambda block: (
+        block.page_num or 10**9,
+        block.bbox[2] if block.bbox and len(block.bbox) >= 5 else 10**9,
+        block.bbox[1] if block.bbox and len(block.bbox) >= 5 else 10**9,
+    ))
+    return blocks
+
+
+def _extract_docling_metadata(document: Any, exported: dict[str, Any]) -> dict[str, Any]:
+    metadata = exported.get("metadata") if isinstance(exported.get("metadata"), dict) else {}
+    title = metadata.get("title") or _value_from_any(document, ("title", "name"))
+    if not title:
+        for text_item in exported.get("texts", []) if isinstance(exported.get("texts"), list) else []:
+            if _docling_label(text_item) in {"title", "document_title"}:
+                title = _value_from_any(text_item, ("text", "orig", "content"))
+                break
+    return {
+        "title": title,
+        "abstract": metadata.get("abstract"),
+        "authors": metadata.get("authors"),
+        "year": metadata.get("year"),
+        "doi": metadata.get("doi"),
+        "num_pages": metadata.get("num_pages") or metadata.get("page_count") or metadata.get("pages"),
+        "lang": metadata.get("lang") or metadata.get("language"),
+    }
+
+
+async def _parse_with_docling(pdf_bytes: bytes, user_id: int, paper_id: int) -> tuple[list[Block], dict[str, Any]]:
+    os.environ.setdefault("DOCLING_ARTIFACTS_PATH", settings.DOCLING_ARTIFACTS_PATH)
+    started = time.perf_counter()
+
+    def _run_docling() -> tuple[list[Block], dict[str, Any]]:
+        try:
+            from docling.document_converter import DocumentConverter
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("docling is not installed in the current Python environment") from exc
+
+        def _build_converter() -> Any:
+            try:
+                from docling.datamodel.base_models import InputFormat
+                from docling.datamodel.pipeline_options import PdfPipelineOptions
+                from docling.document_converter import PdfFormatOption
+
+                pipeline_options = PdfPipelineOptions()
+                pipeline_options.do_ocr = settings.DOCLING_ENABLE_OCR
+                pipeline_options.do_table_structure = settings.DOCLING_ENABLE_TABLE_STRUCTURE
+                return DocumentConverter(
+                    format_options={
+                        InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options),
+                    }
+                )
+            except Exception as exc:  # noqa: BLE001 - Docling option APIs vary across versions.
+                logger.warning(f"[parse] Docling option setup failed, using default converter: {exc}")
+                return DocumentConverter()
+
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                tmp.write(pdf_bytes)
+                tmp.flush()
+                tmp_path = Path(tmp.name)
+
+            converter = _build_converter()
+            result = converter.convert(str(tmp_path))
+            document = result.document
+            if hasattr(document, "export_to_dict"):
+                exported = document.export_to_dict()
+            else:
+                exported = _object_to_dict(document)
+            if not isinstance(exported, dict):
+                exported = {}
+            blocks = _docling_to_blocks(document, exported, user_id, paper_id)
+            metadata = _extract_docling_metadata(document, exported)
+            return blocks, metadata
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+
+    blocks, metadata = await asyncio.to_thread(_run_docling)
+    counts = Counter(block.block_type for block in blocks)
+    missing_page = sum(1 for block in blocks if block.page_num is None)
+    missing_bbox = sum(1 for block in blocks if block.bbox is None)
+    logger.info(
+        f"[parse] Docling returned {len(blocks)} blocks paper_id={paper_id} "
+        f"types={dict(counts)} missing_page={missing_page} missing_bbox={missing_bbox} "
+        f"elapsed_ms={int((time.perf_counter() - started) * 1000)}"
+    )
+    return blocks, metadata
+
+
+async def _parse_document(
+    pdf_key: str,
+    pdf_bytes: bytes,
+    user_id: int,
+    paper_id: int,
+) -> tuple[list[Block], dict[str, Any]]:
+    provider = settings.DOCUMENT_PARSER_PROVIDER.lower().strip()
+    fallback_provider = settings.DOCUMENT_PARSER_FALLBACK_PROVIDER.lower().strip()
+
+    async def _run_provider(selected_provider: str) -> tuple[list[Block], dict[str, Any]]:
+        if selected_provider == "docling":
+            return await _parse_with_docling(pdf_bytes, user_id, paper_id)
+        if selected_provider == "mineru":
+            raw_result = await _call_mineru(pdf_key, pdf_bytes)
+            blocks = await _mineru_to_blocks(raw_result, user_id, paper_id)
+            logger.info(f"[parse] MinerU returned {len(blocks)} blocks paper_id={paper_id}")
+            return blocks, _metadata_from_result(raw_result)
+        raise RuntimeError(f"Unsupported document parser provider: {selected_provider}")
+
+    try:
+        blocks, metadata = await _run_provider(provider)
+        if not blocks:
+            raise RuntimeError(f"document parser returned no blocks provider={provider}")
+        return blocks, metadata
+    except Exception as exc:
+        if fallback_provider == "mineru" and provider != "mineru":
+            logger.warning(f"[parse] provider={provider} failed, falling back to MinerU paper_id={paper_id}: {exc}")
+            blocks, metadata = await _run_provider("mineru")
+            if not blocks:
+                raise RuntimeError("MinerU fallback returned no blocks") from exc
+            return blocks, metadata
+        raise
+
+
 async def _describe_figures(blocks: list[Block]) -> None:
     figure_blocks = [b for b in blocks if b.block_type == "figure" and b.image_key]
     if not figure_blocks:
@@ -325,13 +690,14 @@ async def parse_paper(
     *,
     pdf_bytes: bytes | None = None,
 ) -> ParseResult:
-    logger.info(f"[parse] paper_id={paper_id} user_id={user_id} provider={settings.REFERENCE_PARSER_PROVIDER}")
+    logger.info(
+        f"[parse] paper_id={paper_id} user_id={user_id} "
+        f"document_provider={settings.DOCUMENT_PARSER_PROVIDER} reference_provider={settings.REFERENCE_PARSER_PROVIDER}"
+    )
 
     if pdf_bytes is None:
         pdf_bytes = await download_pdf(pdf_key)
-    raw_result = await _call_mineru(pdf_key, pdf_bytes)
-    blocks = await _mineru_to_blocks(raw_result, user_id, paper_id)
-    logger.info(f"[parse] MinerU returned {len(blocks)} blocks")
+    blocks, metadata = await _parse_document(pdf_key, pdf_bytes, user_id, paper_id)
 
     vlm_task = asyncio.create_task(_describe_figures(blocks))
 
@@ -343,7 +709,6 @@ async def parse_paper(
     await vlm_task
     logger.info(f"[parse] extracted {len(references)} references")
 
-    metadata = _metadata_from_result(raw_result)
     await _write_blocks(user_id, paper_id, blocks, db)
     await _write_citations(user_id, paper_id, references, db)
     await _update_paper_metadata(user_id, paper_id, metadata, db)

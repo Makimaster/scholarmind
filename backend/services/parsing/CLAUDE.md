@@ -5,7 +5,7 @@
 ## 职责与产物
 | 步骤 | 工具 | 产物 |
 |---|---|---|
-| 版面解析 | MinerU (HTTP `MINERU_BASE_URL`) | 双栏正文、公式→LaTeX、表→HTML、抠图 |
+| 版面解析 | Docling（默认，本地开源）/ MinerU（可选回退，`DOCUMENT_PARSER_PROVIDER=mineru`） | 双栏正文、公式、表格、图片块，尽量保留页码与 bbox |
 | 文献结构化 | LLM（默认）/ GROBID（可选，精度更高但镜像 ~4GB） | 参考文献列表 → MySQL `citations` 表；通过 `REFERENCE_PARSER_PROVIDER=llm|grobid` 切换 |
 | 图片描述 | VLM (clients/llm) | 图的中文描述（配合 figure_caption 提示词） |
 
@@ -13,7 +13,7 @@
 
 ## 关键约定（踩坑预防）
 - **绝不丢页码/图**：每个 block 记录 `page_num/bbox`，图存 MinIO 并回填 `image_key`。
-- **双栏**：信任 MinerU 的阅读序，不要自己按坐标硬拼。
+- **双栏**：信任 Docling/MinerU 的阅读序，不要自己按坐标硬拼。
 - **大表**：整表 HTML 存 `doc_blocks`，不在这里切碎（切分在 indexing）。
 - **幂等**：按 `file_hash` 去重，重复文件不重复解析。
 - 解析是 CPU/GPU 重活，**只在 worker 里跑**，不在请求线程。
@@ -22,4 +22,4 @@
 - `parse_paper(user_id, paper_id, pdf_key) -> ParseResult`：解析一篇，落库落 MinIO，返回 block 列表给 indexing。
 
 ## 待开发任务 (TODO)
-- 对接 MinerU/GROBID HTTP；解析结果归一化成 `doc_blocks` schema；异常重试与超时。
+- Docling 为默认文档解析 Provider；MinerU 仅作为显式配置的兼容回退。

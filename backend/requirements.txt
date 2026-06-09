@@ -21,5 +21,6 @@ jinja2==3.1.4
 sentence-transformers==3.1.1
 FlagEmbedding==1.0.2
 mineru-kie-sdk==0.1.1
+docling
 llama-index-core==0.12.7
 rank-bm25==0.2.2

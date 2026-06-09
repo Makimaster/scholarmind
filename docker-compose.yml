@@ -125,6 +125,7 @@ services:
     volumes:
       - ./backend:/app
       - ./prompts:/prompts
+      - ./data/docling-cache:/root/.cache/docling
       # 仅 EMBEDDING_PROVIDER=local_path 或 RERANK_PROVIDER=local_path 时需要:
       # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
       # - D:/your/models:/models
@@ -141,6 +142,7 @@ services:
     volumes:
       - ./backend:/app
       - ./prompts:/prompts
+      - ./data/docling-cache:/root/.cache/docling
       # 仅 EMBEDDING_PROVIDER=local_path 或 RERANK_PROVIDER=local_path 时需要:
       # 把左侧路径改成宿主机实际模型目录，对应 .env 里的 EMBEDDING_MODEL_PATH / RERANK_MODEL_PATH
       # - D:/your:/models
