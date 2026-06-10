@@ -98,8 +98,8 @@ async def enrich_chunks(chunks: list[Chunk]) -> list[Chunk]:
         batch = text_chunks[i : i + _ENRICH_BATCH_SIZE]
         await asyncio.gather(*[_enrich_text(c) for c in batch])
 
-    for i in range(0, len(table_chunks), _BATCH_SIZE):
-        batch = table_chunks[i : i + _BATCH_SIZE]
+    for i in range(0, len(table_chunks), _ENRICH_BATCH_SIZE):
+        batch = table_chunks[i : i + _ENRICH_BATCH_SIZE]
         await asyncio.gather(*[_enrich_table(c) for c in batch])
 
     return chunks
