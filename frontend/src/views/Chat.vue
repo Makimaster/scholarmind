@@ -61,7 +61,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onMounted, ref } from 'vue';
 import { useRoute } from 'vue-router';
 import DOMPurify from 'dompurify';
 import { chatApi, type Citation } from '../api';
@@ -180,6 +180,10 @@ function handleInlineCitationClick(event: MouseEvent) {
   const citation = chatStore.citations[Number(index)];
   if (citation) chatStore.selectCitation(citation);
 }
+
+onMounted(async () => {
+  await chatStore.ensureConversation();
+});
 
 nextTick(() => messageListRef.value?.addEventListener('click', handleInlineCitationClick));
 </script>

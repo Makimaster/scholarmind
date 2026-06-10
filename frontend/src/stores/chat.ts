@@ -15,8 +15,9 @@ const STORAGE_KEY = 'scholarmind-conversation-id';
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([]);
   const citations = ref<Citation[]>([]);
+  const _stored = Number(localStorage.getItem(STORAGE_KEY));
   const currentConversation = ref<number | null>(
-    Number(localStorage.getItem(STORAGE_KEY)) || null,
+    Number.isNaN(_stored) ? null : _stored,
   );
   const streaming = ref(false);
   const activeCitation = ref<Citation | null>(null);
