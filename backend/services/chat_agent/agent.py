@@ -172,7 +172,7 @@ async def stream_chat_query(
     paper_ids: list[int] | None = None,
 ) -> AsyncGenerator[str, None]:
     started = time.perf_counter()
-    history = await memory.get_history(conversation_id, limit=10)
+    history = await memory.get_history(user_id, conversation_id, limit=10)
     intent = await route_intent(question, history)
     scope = build_scope(user_id, scope_type, folder_id, paper_ids)
     chunks: list[Chunk] = []
@@ -198,8 +198,8 @@ async def stream_chat_query(
             yield token_event
 
         latency_ms = int((time.perf_counter() - started) * 1000)
-        await memory.save_message(conversation_id, "user", question)
-        await memory.save_message(conversation_id, "assistant", answer, citations=citations)
+        await memory.save_message(user_id, conversation_id, "user", question)
+        await memory.save_message(user_id, conversation_id, "assistant", answer, citations=citations)
         await _save_query_log(
             user_id=user_id,
             conversation_id=conversation_id,
@@ -213,8 +213,8 @@ async def stream_chat_query(
         logger.exception(f"[chat_agent] chat query failed: {exc}")
         latency_ms = int((time.perf_counter() - started) * 1000)
         fallback = "检索或生成过程中出现错误，请稍后重试或缩小检索范围。"
-        await memory.save_message(conversation_id, "user", question)
-        await memory.save_message(conversation_id, "assistant", fallback, citations=[])
+        await memory.save_message(user_id, conversation_id, "user", question)
+        await memory.save_message(user_id, conversation_id, "assistant", fallback, citations=[])
         yield sse_event("token", {"delta": fallback})
         yield sse_event("done", {"latency_ms": latency_ms, "error": str(exc)})
 

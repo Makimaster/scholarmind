@@ -98,7 +98,7 @@ def _cache_key(query: str, scope: RetrievalScope, top_k: int) -> str:
         },
     }
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
-    return f"retrieval:v1:{scope.user_id}:{digest}"
+    return f"retrieval:v3:{scope.user_id}:{digest}"
 
 
 def _chunk_from_hit(hit: dict[str, Any], score: float, source_label: str) -> Chunk:

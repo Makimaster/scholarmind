@@ -16,7 +16,7 @@
         <header class="panel-header">
           <div>
             <h1>文献智能调研对话</h1>
-            <span class="scope-badge">检索范围：当前用户知识库</span>
+            <span class="scope-badge">检索范围：{{ scopeLabel }}</span>
           </div>
         </header>
 
@@ -61,7 +61,8 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref } from 'vue';
+import { computed, nextTick, ref } from 'vue';
+import { useRoute } from 'vue-router';
 import DOMPurify from 'dompurify';
 import { chatApi, type Citation } from '../api';
 import CitationCard from '../components/CitationCard.vue';
@@ -69,10 +70,21 @@ import PreviewPanel from '../components/PreviewPanel.vue';
 import { useAuthStore } from '../stores/auth';
 import { useChatStore } from '../stores/chat';
 
+const route = useRoute();
 const authStore = useAuthStore();
 const chatStore = useChatStore();
 const inputQuery = ref('');
 const messageListRef = ref<HTMLDivElement | null>(null);
+
+const scopedPaperIds = computed(() => {
+  const rawPaperId = route.query.paperId;
+  const values = Array.isArray(rawPaperId) ? rawPaperId : rawPaperId ? [rawPaperId] : [];
+  return values
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value) && value > 0);
+});
+
+const scopeLabel = computed(() => (scopedPaperIds.value.length ? '当前选中文献' : '当前用户知识库'));
 
 function renderMessage(content: string, citations: Citation[]) {
   const escaped = DOMPurify.sanitize(content.replace(/\n/g, '<br>'));
@@ -103,40 +115,46 @@ async function sendMessage() {
   chatStore.startAssistantMessage();
   await scrollToBottom();
 
-  const response = await fetch(chatApi.queryUrl, {
-    method: 'POST',
-    headers: chatApi.headers(),
-    body: JSON.stringify({
-      conversation_id: chatStore.currentConversation,
-      question,
-      scope_type: 'all',
-      folder_id: null,
-      paper_ids: [],
-    }),
-  });
+  try {
+    const conversationId = await chatStore.ensureConversation();
+    const paperIds = scopedPaperIds.value;
+    const response = await fetch(chatApi.queryUrl, {
+      method: 'POST',
+      headers: chatApi.headers(),
+      body: JSON.stringify({
+        conversation_id: conversationId,
+        question,
+        scope_type: paperIds.length ? 'papers' : 'all',
+        folder_id: null,
+        paper_ids: paperIds,
+      }),
+    });
 
-  if (!response.ok || !response.body) {
-    chatStore.appendToken(`请求失败：${response.status}`);
+    if (!response.ok || !response.body) {
+      chatStore.appendToken(`请求失败：${response.status}`);
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split('\n\n');
+      buffer = blocks.pop() || '';
+      for (const block of blocks) handleSseBlock(block);
+      await scrollToBottom();
+    }
+    if (buffer.trim()) handleSseBlock(buffer);
+  } catch {
+    chatStore.appendToken('请求失败，请稍后重试。');
+  } finally {
     chatStore.finishStreaming();
-    return;
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder('utf-8');
-  let buffer = '';
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const blocks = buffer.split('\n\n');
-    buffer = blocks.pop() || '';
-    for (const block of blocks) handleSseBlock(block);
     await scrollToBottom();
   }
-  if (buffer.trim()) handleSseBlock(buffer);
-  chatStore.finishStreaming();
-  await scrollToBottom();
 }
 
 function handleSseBlock(block: string) {
@@ -144,7 +162,12 @@ function handleSseBlock(block: string) {
   const dataLine = block.split('\n').find((line) => line.startsWith('data:'));
   if (!eventLine || !dataLine) return;
   const event = eventLine.replace('event:', '').trim();
-  const payload = JSON.parse(dataLine.replace('data:', '').trim());
+  let payload: any;
+  try {
+    payload = JSON.parse(dataLine.replace('data:', '').trim());
+  } catch {
+    return;
+  }
   if (event === 'cite') chatStore.appendCitation(payload as Citation);
   if (event === 'token') chatStore.appendToken(payload.delta || '');
   if (event === 'done') chatStore.finishStreaming(payload.latency_ms);

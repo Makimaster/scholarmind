@@ -18,6 +18,8 @@ from common.logging import logger
 
 _client: MilvusClient | None = None
 _collection_ready = False
+DENSE_INDEX_NAME = "dense_hnsw_idx"
+SPARSE_INDEX_NAME = "sparse_inverted_idx"
 
 
 def get_milvus_client() -> MilvusClient:
@@ -28,6 +30,22 @@ def get_milvus_client() -> MilvusClient:
             token=settings.MILVUS_TOKEN or "",
         )
     return _client
+
+
+def _object_to_dict(value: Any) -> Any:
+    if isinstance(value, dict):
+        return value
+    for method_name in ("model_dump", "dict"):
+        method = getattr(value, method_name, None)
+        if callable(method):
+            try:
+                result = method()
+                if isinstance(result, dict):
+                    return result
+            except Exception:
+                pass
+    raw = getattr(value, "__dict__", None)
+    return raw if isinstance(raw, dict) else {}
 
 
 def _build_schema() -> Any:
@@ -56,22 +74,34 @@ def _build_schema() -> Any:
     return schema
 
 
-def _build_index_params() -> Any:
+def _build_index_params(fields: tuple[str, ...] = ("dense_vec", "sparse_vec")) -> Any:
     from pymilvus import MilvusClient
     index_params = MilvusClient.prepare_index_params()
-    index_params.add_index(
-        field_name="dense_vec",
-        index_type=settings.MILVUS_INDEX_TYPE,
-        metric_type=settings.MILVUS_METRIC,
-        params={"M": 16, "efConstruction": 200},
-    )
-    index_params.add_index(
-        field_name="sparse_vec",
-        index_type="SPARSE_INVERTED_INDEX",
-        metric_type="IP",
-        params={"drop_ratio_build": 0.2},
-    )
+    if "dense_vec" in fields:
+        index_params.add_index(
+            field_name="dense_vec",
+            index_type=settings.MILVUS_INDEX_TYPE,
+            index_name=DENSE_INDEX_NAME,
+            metric_type=settings.MILVUS_METRIC,
+            params={"M": 16, "efConstruction": 200},
+        )
+    if "sparse_vec" in fields:
+        index_params.add_index(
+            field_name="sparse_vec",
+            index_type="SPARSE_INVERTED_INDEX",
+            index_name=SPARSE_INDEX_NAME,
+            metric_type="IP",
+            params={"drop_ratio_build": 0.2},
+        )
     return index_params
+
+
+def _has_field_index(client: MilvusClient, collection_name: str, field_name: str) -> bool:
+    try:
+        return bool(client.list_indexes(collection_name, field_name=field_name))
+    except MilvusException as e:
+        logger.warning(f"[milvus] list indexes failed for {field_name}: {e}")
+        return False
 
 
 def _ensure_collection_sync() -> None:
@@ -88,10 +118,14 @@ def _ensure_collection_sync() -> None:
         )
         logger.info(f"[milvus] collection '{col}' created")
     else:
-        existing = client.describe_index(col, "dense_vec")
-        if not existing:
-            client.create_index(col, _build_index_params())
-            logger.info(f"[milvus] index added to existing collection '{col}'")
+        missing_fields = tuple(
+            field_name
+            for field_name in ("dense_vec", "sparse_vec")
+            if not _has_field_index(client, col, field_name)
+        )
+        if missing_fields:
+            client.create_index(col, _build_index_params(missing_fields))
+            logger.info(f"[milvus] missing indexes added to existing collection '{col}': {missing_fields}")
     client.load_collection(col)
     _collection_ready = True
     logger.info(f"[milvus] collection '{col}' ready")
@@ -148,6 +182,24 @@ DEFAULT_CHUNK_OUTPUT_FIELDS = [
 ]
 
 
+def _read_entity_field(entity: Any, field_name: str) -> Any:
+    if entity is None:
+        return None
+    if isinstance(entity, dict):
+        return entity.get(field_name)
+    getter = getattr(entity, "get", None)
+    if callable(getter):
+        try:
+            return getter(field_name)
+        except Exception:
+            pass
+    try:
+        return entity[field_name]  # type: ignore[index]
+    except Exception:
+        pass
+    return getattr(entity, field_name, None)
+
+
 def _dense_search_sync(
     vector: list[float],
     filter_expr: str,
@@ -159,6 +211,7 @@ def _dense_search_sync(
 
     _ensure_collection_sync()
     client = get_milvus_client()
+    fields = output_fields or DEFAULT_CHUNK_OUTPUT_FIELDS
     results = client.search(
         collection_name=settings.MILVUS_COLLECTION,
         data=[vector],
@@ -166,23 +219,36 @@ def _dense_search_sync(
         search_params={"metric_type": settings.MILVUS_METRIC, "params": {"ef": 64}},
         filter=filter_expr,
         limit=limit,
-        output_fields=output_fields or DEFAULT_CHUNK_OUTPUT_FIELDS,
+        output_fields=fields,
     )
 
     hits: list[dict[str, Any]] = []
     for hit in results[0] if results else []:
+        entity = hit.get("entity", {}) if isinstance(hit, dict) else getattr(hit, "entity", None)
+        entity_dict = _read_entity_field(entity, "entity")
+        if not isinstance(entity_dict, dict):
+            entity_dict = _object_to_dict(entity)
+        if isinstance(entity_dict.get("entity"), dict):
+            entity_dict = entity_dict["entity"]
+
+        record: dict[str, Any] = {}
+        for field_name in fields:
+            value = entity_dict.get(field_name)
+            if value is not None:
+                record[field_name] = value
+
         if isinstance(hit, dict):
-            entity = hit.get("entity", {}) or {}
-            hit_id = hit.get("id") or entity.get("id")
+            for key, value in hit.items():
+                if key != "entity" and value is not None:
+                    record.setdefault(key, value)
+            hit_id = hit.get("id") or record.get("id")
             score = hit.get("score", hit.get("distance", 0.0))
         else:
-            entity = getattr(hit, "entity", None) or {}
-            hit_id = getattr(hit, "id", None) or getattr(entity, "get", lambda _key, _default=None: _default)("id")
+            hit_id = getattr(hit, "id", None) or record.get("id")
             score = getattr(hit, "score", None)
             if score is None:
                 score = getattr(hit, "distance", 0.0)
 
-        record = dict(entity)
         record["id"] = str(hit_id or record.get("id", ""))
         record["score"] = float(score or 0.0)
         hits.append(record)

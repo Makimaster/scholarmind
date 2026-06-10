@@ -18,6 +18,7 @@ from app.schemas.papers import (
     PaperUploadResponse,
 )
 from common.clients.minio import upload_pdf
+from common.clients.milvus import delete_by_paper
 from common.clients.redis import enqueue_ingest_task
 from common.db.mysql import AsyncSessionLocal, get_mysql_session
 
@@ -146,6 +147,10 @@ async def upload_papers(
             if paper_status == "done":
                 task_id = await _create_task(db, batch_id, user_id, paper_id, filename, file_hash, "done", 100)
             else:
+                await db.execute(
+                    text("UPDATE papers SET status = 'queued' WHERE id = :paper_id AND user_id = :user_id"),
+                    {"paper_id": paper_id, "user_id": user_id},
+                )
                 task_id = await _create_task(db, batch_id, user_id, paper_id, filename, file_hash, "queued", 0)
                 queued_jobs.append((user_id, paper_id, pdf_key, task_id))
             task_ids.append(str(task_id))
@@ -214,16 +219,40 @@ async def get_paper_detail(id: int, user_id: CurrentUserId = None):  # type: ign
 
 # --------------------------------------------------------------------------- delete paper
 @router.delete("/{id}", status_code=status.HTTP_200_OK, summary="删除论文",
-    description="删除指定论文（MinIO/Milvus 清理后续补齐）。")
+    description="删除指定论文及其解析块、引用边和向量索引。")
 async def delete_paper(id: int, user_id: CurrentUserId = None):  # type: ignore[valid-type]
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
+        exists = await session.execute(
+            text("SELECT id FROM papers WHERE id = :id AND user_id = :user_id LIMIT 1"),
+            {"id": id, "user_id": user_id},
+        )
+        if exists.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        await delete_by_paper(user_id, id)
+        await session.execute(
+            text("DELETE FROM doc_blocks WHERE paper_id = :id AND user_id = :user_id"),
+            {"id": id, "user_id": user_id},
+        )
+        await session.execute(
+            text("""
+                DELETE c FROM citations c
+                LEFT JOIN papers src ON src.id = c.src_paper_id
+                LEFT JOIN papers dst ON dst.id = c.dst_paper_id
+                WHERE (c.src_paper_id = :id AND src.user_id = :user_id)
+                   OR (c.dst_paper_id = :id AND dst.user_id = :user_id)
+            """),
+            {"id": id, "user_id": user_id},
+        )
+        await session.execute(
+            text("DELETE FROM ingest_tasks WHERE paper_id = :id AND user_id = :user_id"),
+            {"id": id, "user_id": user_id},
+        )
+        await session.execute(
             text("DELETE FROM papers WHERE id = :id AND user_id = :user_id"),
             {"id": id, "user_id": user_id},
         )
         await session.commit()
-        if result.rowcount == 0:
-            raise HTTPException(status_code=404, detail="Paper not found")
     return {"status": "success", "message": f"Paper {id} has been deleted successfully."}
 
 

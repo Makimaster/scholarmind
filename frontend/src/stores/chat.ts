@@ -20,14 +20,14 @@ export const useChatStore = defineStore('chat', () => {
     },
   ]);
   const citations = ref<Citation[]>([]);
-  const currentConversation = ref<number>(101);
+  const currentConversation = ref<number | null>(null);
   const streaming = ref(false);
   const activeCitation = ref<Citation | null>(null);
 
   const currentAssistantMessage = computed(() => [...messages.value].reverse().find((msg) => msg.role === 'assistant'));
 
   async function ensureConversation() {
-    if (currentConversation.value) return currentConversation.value;
+    if (currentConversation.value !== null) return currentConversation.value;
     const conversation = await chatApi.createConversation({ title: '文献调研会话' });
     currentConversation.value = conversation.id;
     return conversation.id;

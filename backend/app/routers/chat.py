@@ -114,18 +114,19 @@ async def list_conversations(user_id: CurrentUserId = None):  # type: ignore[val
     summary="对话历史消息",
     description="获取指定会话的完整消息历史，每条 assistant 消息包含引用溯源信息。",
 )
-async def list_messages(id: int):
+async def list_messages(id: int, user_id: CurrentUserId = None):  # type: ignore[valid-type]
     async with PGSessionLocal() as session:
         result = await session.execute(
             text(
                 """
-                SELECT id, conversation_id, role, content, citations, created_at
-                FROM messages
-                WHERE conversation_id = :conversation_id
-                ORDER BY created_at ASC, id ASC
+                SELECT m.id, m.conversation_id, m.role, m.content, m.citations, m.created_at
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id = :conversation_id AND c.user_id = :user_id
+                ORDER BY m.created_at ASC, m.id ASC
                 """
             ),
-            {"conversation_id": id},
+            {"conversation_id": id, "user_id": user_id},
         )
         rows = result.mappings().all()
     messages: list[MessageResponse] = []
@@ -171,9 +172,19 @@ async def chat_query(request: ChatQueryRequest, user_id: CurrentUserId = None): 
     summary="答案反馈（点赞/踩）",
     description="对 assistant 回答进行正负反馈，后续用于更新 query_logs。",
 )
-async def message_feedback(data: FeedbackRequest):
+async def message_feedback(data: FeedbackRequest, user_id: CurrentUserId = None):  # type: ignore[valid-type]
     async with PGSessionLocal() as session:
-        exists = await session.execute(text("SELECT id FROM messages WHERE id = :id"), {"id": data.message_id})
+        exists = await session.execute(
+            text(
+                """
+                SELECT m.id
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.id = :id AND c.user_id = :user_id
+                """
+            ),
+            {"id": data.message_id, "user_id": user_id},
+        )
         if exists.scalar_one_or_none() is None:
             raise HTTPException(status_code=404, detail="Message not found")
     return FeedbackResponse(status="success", message="Feedback received.")

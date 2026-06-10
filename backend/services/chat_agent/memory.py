@@ -8,20 +8,20 @@ from sqlalchemy import text
 from common.db.pg import AsyncSessionLocal
 
 
-async def get_history(conversation_id: int, limit: int = 10) -> list[dict[str, str]]:
-    """Load the latest conversation messages from PostgreSQL memory."""
+async def get_history(user_id: int, conversation_id: int, limit: int = 10) -> list[dict[str, str]]:
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text(
                 """
-                SELECT role, content
-                FROM messages
-                WHERE conversation_id = :conversation_id
-                ORDER BY created_at DESC, id DESC
+                SELECT m.role, m.content
+                FROM messages m
+                JOIN conversations c ON c.id = m.conversation_id
+                WHERE m.conversation_id = :conversation_id AND c.user_id = :user_id
+                ORDER BY m.created_at DESC, m.id DESC
                 LIMIT :limit
                 """
             ),
-            {"conversation_id": conversation_id, "limit": limit},
+            {"user_id": user_id, "conversation_id": conversation_id, "limit": limit},
         )
         rows = list(result.mappings())
     rows.reverse()
@@ -29,31 +29,43 @@ async def get_history(conversation_id: int, limit: int = 10) -> list[dict[str, s
 
 
 async def save_message(
+    user_id: int,
     conversation_id: int,
     role: str,
     content: str,
     citations: list[dict[str, Any]] | None = None,
 ) -> int:
-    """Persist one conversation message and optional citation metadata."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text(
                 """
                 INSERT INTO messages (conversation_id, role, content, citations)
-                VALUES (:conversation_id, :role, :content, CAST(:citations AS jsonb))
+                SELECT :conversation_id, :role, :content, CAST(:citations AS jsonb)
+                WHERE EXISTS (
+                    SELECT 1 FROM conversations
+                    WHERE id = :conversation_id AND user_id = :user_id
+                )
                 RETURNING id
                 """
             ),
             {
+                "user_id": user_id,
                 "conversation_id": conversation_id,
                 "role": role,
                 "content": content,
                 "citations": json.dumps(citations if citations is not None else [], ensure_ascii=False),
             },
         )
-        message_id = int(result.scalar_one())
+        message_id = result.scalar_one_or_none()
+        if message_id is None:
+            await session.rollback()
+            raise RuntimeError(f"conversation not found: conversation_id={conversation_id} user_id={user_id}")
+        await session.execute(
+            text("UPDATE conversations SET updated_at = now() WHERE id = :conversation_id AND user_id = :user_id"),
+            {"conversation_id": conversation_id, "user_id": user_id},
+        )
         await session.commit()
-        return message_id
+        return int(message_id)
 
 
 async def get_or_create_conversation(
@@ -62,11 +74,6 @@ async def get_or_create_conversation(
     folder_id: int | None = None,
     paper_ids: list[int] | None = None,
 ) -> int:
-    """Get or create a conversation for a user.
-
-    The current PostgreSQL schema does not store folder_id/paper_ids, so those
-    parameters are accepted for API compatibility and future schema expansion.
-    """
     del folder_id, paper_ids
     normalized_title = title or "新会话"
     async with AsyncSessionLocal() as session:

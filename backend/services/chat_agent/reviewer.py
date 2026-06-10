@@ -8,6 +8,7 @@ from typing import Any
 from common.clients.llm import chat_complete, chat_complete_json
 from common.config import settings
 from common.logging import logger
+from services.chat_agent import memory
 from services.retrieval import Chunk, RetrievalScope, retrieve
 from services.retrieval.query_optimizer import _load_prompt, _render_prompt
 from services.chat_agent.agent import chunks_to_citations, chunks_to_context, sse_event
@@ -52,7 +53,6 @@ async def generate_review(
     conversation_id: int | None = None,
 ) -> AsyncGenerator[str, None]:
     """Generate an agentic literature review as SSE events."""
-    del conversation_id
     started = time.perf_counter()
     try:
         subquestions = await _split_topic(topic)
@@ -74,11 +74,18 @@ async def generate_review(
             yield sse_event("token", {"delta": answer[index : index + 8]})
 
         latency_ms = int((time.perf_counter() - started) * 1000)
+        if conversation_id is not None:
+            await memory.save_message(user_id, conversation_id, "user", topic)
+            await memory.save_message(user_id, conversation_id, "assistant", answer, citations=citations)
         yield sse_event("done", {"latency_ms": latency_ms, "subquestions": subquestions})
     except Exception as exc:  # noqa: BLE001 - keep SSE contract on failure.
         logger.exception(f"[reviewer] review generation failed: {exc}")
         latency_ms = int((time.perf_counter() - started) * 1000)
-        yield sse_event("token", {"delta": "综述生成过程中出现错误，请稍后重试或缩小范围。"})
+        fallback = "综述生成过程中出现错误，请稍后重试或缩小范围。"
+        if conversation_id is not None:
+            await memory.save_message(user_id, conversation_id, "user", topic)
+            await memory.save_message(user_id, conversation_id, "assistant", fallback, citations=[])
+        yield sse_event("token", {"delta": fallback})
         yield sse_event("done", {"latency_ms": latency_ms, "error": str(exc)})
 
 
