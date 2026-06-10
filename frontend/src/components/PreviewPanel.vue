@@ -16,9 +16,10 @@
         <p v-if="citation.chunk_type === 'text'" class="text-block">{{ citation.content }}</p>
         <div v-else-if="citation.chunk_type === 'table'" class="table-block" v-html="safeHtml"></div>
         <div v-else-if="citation.chunk_type === 'figure'" class="figure-block">
-          <img v-if="props.citation?.image_key" :src="figureUrl" :style="{ transform: `scale(${zoom})` }" alt="引用图像"
+          <img v-if="figureUrl" :src="figureUrl" :style="{ transform: `scale(${zoom})` }" alt="引用图像"
                @error="imageLoadError = true" />
-          <div v-if="imageLoadError" class="empty-figure">⚠️ 图片暂不可用（需要 MinIO presigned URL）</div>
+          <div v-if="imageLoadError" class="empty-figure">图片暂不可用</div>
+          <div v-else-if="props.citation?.image_key && !figureUrl" class="empty-figure">图片加载中...</div>
           <div v-else-if="!props.citation?.image_key" class="empty-figure">暂无图片</div>
           <p>{{ citation.content }}</p>
           <div class="zoom-actions">
@@ -44,23 +45,28 @@ import DOMPurify from 'dompurify';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import type { Citation } from '../api';
+import { paperApi } from '../api';
 
 const props = defineProps<{ citation: Citation | null }>();
 const zoom = ref(1);
 const imageLoadError = ref(false);
+const figureUrl = ref('');
 
-watch(() => props.citation, () => { zoom.value = 1; imageLoadError.value = false; });
+watch(() => props.citation, async (citation) => {
+  zoom.value = 1;
+  imageLoadError.value = false;
+  figureUrl.value = '';
+  if (!citation?.image_key) return;
+  try {
+    figureUrl.value = await paperApi.figureUrl(citation.image_key);
+  } catch {
+    imageLoadError.value = true;
+  }
+}, { immediate: true });
 
 const typeMap: Record<string, string> = { text: '文本段落', table: 'HTML 表格', figure: '论文图像', formula: '公式' };
 const typeLabel = computed(() => props.citation ? (typeMap[props.citation.chunk_type] || props.citation.chunk_type) : '');
 const safeHtml = computed(() => DOMPurify.sanitize(props.citation?.content || '', { USE_PROFILES: { html: true } }));
-const figureUrl = computed(() => {
-  if (!props.citation?.image_key) return '';
-  const key = props.citation.image_key;
-  // image_key is a MinIO object key like "{user_id}/{paper_id}/{block_id}.png"
-  // In production the backend should serve a presigned URL via its API gateway
-  return '';  // defer to backend; PreviewPanel shows empty-figure fallback until presigned URL is wired
-});
 const formulaHtml = computed(() => {
   try {
     return katex.renderToString(props.citation?.content || '', { displayMode: true, throwOnError: false });

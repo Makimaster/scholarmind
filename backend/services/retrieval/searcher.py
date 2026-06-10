@@ -7,11 +7,13 @@ import asyncio
 import hashlib
 import json
 import re
+
+import xxhash
 from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from common.clients.llm import embed_texts
-from common.clients.milvus import dense_search
+from common.clients.milvus import dense_search, sparse_search
 from common.clients.redis import redis_get_json, redis_set_json
 from common.config import settings
 from common.logging import logger
@@ -81,6 +83,21 @@ def _scope_payload(scope: RetrievalScope) -> dict[str, Any]:
         "folder_id": scope.folder_id,
         "paper_ids": sorted(scope.paper_ids or []),
     }
+
+
+def _token_id(token: str) -> int:
+    return xxhash.xxh32(token).intdigest() % (2**20)
+
+
+def _sparse_query_vector(text: str) -> dict[int, float]:
+    tokens = [token for token in _normalize_query(text).split() if token]
+    if not tokens:
+        return {0: 0.0}
+    vector: dict[int, float] = {}
+    for token in tokens:
+        token_id = _token_id(token)
+        vector[token_id] = vector.get(token_id, 0.0) + 1.0
+    return vector
 
 
 def _cache_key(query: str, scope: RetrievalScope, top_k: int) -> str:
@@ -175,6 +192,13 @@ async def _dense_route(query_text: str, scope: RetrievalScope, top_k: int, label
     return hits
 
 
+async def _sparse_route(query_text: str, scope: RetrievalScope, top_k: int, label: str) -> list[dict[str, Any]]:
+    filter_expr = build_scope_filter(scope)
+    hits = await sparse_search(_sparse_query_vector(query_text), filter_expr, top_k)
+    logger.info(f"[retrieval] route={label} hits={len(hits)} filter={filter_expr}")
+    return hits
+
+
 def _rrf_fuse(route_hits: dict[str, list[dict[str, Any]]], top_k: int) -> list[Chunk]:
     fused: dict[str, Chunk] = {}
     for label, hits in route_hits.items():
@@ -192,15 +216,16 @@ def _rrf_fuse(route_hits: dict[str, list[dict[str, Any]]], top_k: int) -> list[C
 
 
 async def hybrid_search(query_bundle: QueryBundle, scope: RetrievalScope, top_k: int) -> list[Chunk]:
-    """Run three concurrent dense retrieval routes and fuse them with RRF."""
+    """Run dense and sparse retrieval routes and fuse them with RRF."""
     results = await asyncio.gather(
         _dense_route(query_bundle.translated_en, scope, top_k, "en_dense"),
         _dense_route(query_bundle.rewritten, scope, top_k, "zh_dense"),
         _dense_route(query_bundle.hyde_doc, scope, top_k, "hyde_dense"),
+        _sparse_route(query_bundle.rewritten or query_bundle.original, scope, top_k, "sparse"),
         return_exceptions=True,
     )
 
-    labels = ["en_dense", "zh_dense", "hyde_dense"]
+    labels = ["en_dense", "zh_dense", "hyde_dense", "sparse"]
     route_hits: dict[str, list[dict[str, Any]]] = {}
     for label, result in zip(labels, results):
         if isinstance(result, Exception):

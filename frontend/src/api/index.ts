@@ -8,7 +8,9 @@ export interface TokenResponse { access_token: string; token_type: string }
 export interface Citation {
   paper_id: number;
   paper_title: string;
+  page: number;
   page_num: number;
+  chunk_id: string;
   bbox: string;
   chunk_type: 'text' | 'table' | 'figure' | 'formula' | string;
   content: string;
@@ -106,6 +108,10 @@ export const paperApi = {
   async delete(id: number) {
     const { data } = await api.delete(`/papers/${id}`);
     return data;
+  },
+  async figureUrl(imageKey: string) {
+    const { data } = await api.get<{ url: string }>('/papers/figures/url', { params: { image_key: imageKey } });
+    return data.url;
   },
   async progress(batchId: number | string) {
     const { data } = await api.get(`/ingest/batches/${batchId}`);

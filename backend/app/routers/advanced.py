@@ -50,17 +50,20 @@ async def get_citation_graph(paper_id: Optional[int] = None, user_id: CurrentUse
         node_rows = nodes_raw.mappings().all()
 
         paper_ids = [int(r["id"]) for r in node_rows]
+        if not paper_ids:
+            return CitationGraphResponse(nodes=[], edges=[])
 
-        # For each connected pair where both papers are in node set
         id_set = set(paper_ids)
+        placeholders = ", ".join(f":paper_id_{index}" for index, _ in enumerate(paper_ids))
+        params = {f"paper_id_{index}": paper_id_value for index, paper_id_value in enumerate(paper_ids)}
         edges_raw = await session.execute(
-            text("""
+            text(f"""
                 SELECT c.src_paper_id, c.dst_paper_id
                 FROM citations c
-                WHERE c.src_paper_id = ANY(:paper_ids) AND c.dst_paper_id = ANY(:paper_ids)
+                WHERE c.src_paper_id IN ({placeholders}) AND c.dst_paper_id IN ({placeholders})
                   AND c.dst_paper_id IS NOT NULL
             """),
-            {"paper_ids": paper_ids},
+            params,
         )
 
     nodes = [

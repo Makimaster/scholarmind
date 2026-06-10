@@ -17,7 +17,8 @@ from app.schemas.papers import (
     PaperResponse,
     PaperUploadResponse,
 )
-from common.clients.minio import upload_pdf
+from common.clients.minio import presigned_get_url, remove_object, remove_objects_by_prefix, upload_pdf
+from common.config import settings
 from common.clients.milvus import delete_by_paper
 from common.clients.redis import enqueue_ingest_task
 from common.db.mysql import AsyncSessionLocal, get_mysql_session
@@ -156,8 +157,32 @@ async def upload_papers(
             task_ids.append(str(task_id))
         await _update_batch_counts(db, batch_id, user_id)
         await db.commit()
+        enqueue_errors: list[str] = []
         for uid, pid, key, tid in queued_jobs:
-            enqueue_ingest_task(uid, pid, key, tid)
+            try:
+                enqueue_ingest_task(uid, pid, key, tid)
+            except Exception as exc:  # noqa: BLE001 - persist failed enqueue state for recovery.
+                message = f"Failed to enqueue ingest task: {exc}"
+                enqueue_errors.append(message)
+                async with AsyncSessionLocal() as fail_session:
+                    await fail_session.execute(
+                        text(
+                            """
+                            UPDATE ingest_tasks
+                            SET stage = 'failed', progress = 0, error_msg = :error_msg, finished_at = NOW()
+                            WHERE id = :task_id AND user_id = :user_id
+                            """
+                        ),
+                        {"task_id": tid, "user_id": uid, "error_msg": message[:2000]},
+                    )
+                    await fail_session.execute(
+                        text("UPDATE papers SET status = 'failed' WHERE id = :paper_id AND user_id = :user_id"),
+                        {"paper_id": pid, "user_id": uid},
+                    )
+                    await _update_batch_counts(fail_session, batch_id, uid)
+                    await fail_session.commit()
+        if enqueue_errors:
+            raise HTTPException(status_code=500, detail="; ".join(enqueue_errors))
     except HTTPException:
         raise
     except Exception as exc:
@@ -198,6 +223,15 @@ async def list_papers(
     ]
 
 
+# --------------------------------------------------------------------------- figure preview
+@router.get("/figures/url", summary="获取图像预签名 URL", description="按 image_key 获取当前用户图像对象的临时访问 URL。")
+async def get_figure_url(image_key: str, user_id: CurrentUserId = None):  # type: ignore[valid-type]
+    prefix = f"{user_id}/"
+    if not image_key.startswith(prefix):
+        raise HTTPException(status_code=404, detail="Figure not found")
+    return {"url": await presigned_get_url(settings.MINIO_BUCKET_FIG, image_key)}
+
+
 # --------------------------------------------------------------------------- paper detail
 @router.get("/{id}", response_model=PaperDetailResponse, summary="论文详情", description="获取单篇论文的完整信息。")
 async def get_paper_detail(id: int, user_id: CurrentUserId = None):  # type: ignore[valid-type]
@@ -223,13 +257,16 @@ async def get_paper_detail(id: int, user_id: CurrentUserId = None):  # type: ign
 async def delete_paper(id: int, user_id: CurrentUserId = None):  # type: ignore[valid-type]
     async with AsyncSessionLocal() as session:
         exists = await session.execute(
-            text("SELECT id FROM papers WHERE id = :id AND user_id = :user_id LIMIT 1"),
+            text("SELECT id, pdf_key FROM papers WHERE id = :id AND user_id = :user_id LIMIT 1"),
             {"id": id, "user_id": user_id},
         )
-        if exists.scalar_one_or_none() is None:
+        paper = exists.mappings().first()
+        if paper is None:
             raise HTTPException(status_code=404, detail="Paper not found")
 
         await delete_by_paper(user_id, id)
+        await remove_object(settings.MINIO_BUCKET_PDF, str(paper["pdf_key"] or ""))
+        await remove_objects_by_prefix(settings.MINIO_BUCKET_FIG, f"{user_id}/{id}/")
         await session.execute(
             text("DELETE FROM doc_blocks WHERE paper_id = :id AND user_id = :user_id"),
             {"id": id, "user_id": user_id},

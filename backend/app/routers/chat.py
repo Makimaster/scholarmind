@@ -17,6 +17,7 @@ from app.schemas.chat import (
     FeedbackResponse,
     MessageResponse,
 )
+from common.db.mysql import AsyncSessionLocal as MySQLSessionLocal
 from common.db.pg import AsyncSessionLocal as PGSessionLocal
 from app.deps import CurrentUserId
 from services.chat_agent.agent import stream_chat_query
@@ -26,10 +27,13 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 
 def _citation_response(item: dict[str, Any]) -> CitationResponse:
+    page = int(item.get("page") or item.get("page_num") or 0)
     return CitationResponse(
         paper_id=int(item.get("paper_id") or 0),
         paper_title=str(item.get("paper_title") or ""),
-        page_num=int(item.get("page_num") or item.get("page") or 0),
+        page=page,
+        page_num=page,
+        chunk_id=str(item.get("chunk_id") or ""),
         bbox=str(item.get("bbox") or ""),
         chunk_type=str(item.get("chunk_type") or "text"),
         content=str(item.get("content") or ""),
@@ -177,7 +181,7 @@ async def message_feedback(data: FeedbackRequest, user_id: CurrentUserId = None)
         exists = await session.execute(
             text(
                 """
-                SELECT m.id
+                SELECT m.id, m.conversation_id
                 FROM messages m
                 JOIN conversations c ON c.id = m.conversation_id
                 WHERE m.id = :id AND c.user_id = :user_id
@@ -185,6 +189,26 @@ async def message_feedback(data: FeedbackRequest, user_id: CurrentUserId = None)
             ),
             {"id": data.message_id, "user_id": user_id},
         )
-        if exists.scalar_one_or_none() is None:
+        message = exists.mappings().first()
+        if message is None:
             raise HTTPException(status_code=404, detail="Message not found")
+
+    feedback = 1 if data.is_positive else -1
+    async with MySQLSessionLocal() as session:
+        result = await session.execute(
+            text(
+                """
+                UPDATE query_logs
+                SET feedback = :feedback
+                WHERE user_id = :user_id
+                  AND conversation_id = :conversation_id
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
+                """
+            ),
+            {"feedback": feedback, "user_id": user_id, "conversation_id": int(message["conversation_id"])},
+        )
+        await session.commit()
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Query log not found")
     return FeedbackResponse(status="success", message="Feedback received.")

@@ -3,6 +3,7 @@ from datetime import timedelta
 from io import BytesIO
 
 from minio import Minio
+from minio.deleteobjects import DeleteObject
 
 from common.config import settings
 
@@ -81,3 +82,22 @@ async def presigned_get_url(bucket: str, key: str, expires_seconds: int = 3600) 
         key,
         expires=timedelta(seconds=expires_seconds),
     )
+
+
+async def remove_object(bucket: str, key: str | None) -> None:
+    if not key:
+        return
+    await ensure_buckets()
+    await asyncio.to_thread(_client.remove_object, bucket, key)
+
+
+async def remove_objects_by_prefix(bucket: str, prefix: str) -> None:
+    await ensure_buckets()
+
+    def _remove() -> None:
+        objects = _client.list_objects(bucket, prefix=prefix, recursive=True)
+        errors = _client.remove_objects(bucket, (DeleteObject(obj.object_name) for obj in objects))
+        for error in errors:
+            raise RuntimeError(f"MinIO delete failed for {error.object_name}: {error}")
+
+    await asyncio.to_thread(_remove)

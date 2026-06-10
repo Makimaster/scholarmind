@@ -18,7 +18,9 @@ class ConversationResponse(BaseModel):
 class CitationResponse(BaseModel):
     paper_id: int
     paper_title: str
+    page: int
     page_num: int
+    chunk_id: str
     bbox: str
     chunk_type: str  # "text", "table", "figure", "formula"
     content: str

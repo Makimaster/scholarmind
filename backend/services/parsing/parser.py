@@ -14,6 +14,7 @@ import tempfile
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +36,7 @@ class Block:
     page_num: int | None = None
     bbox: list | None = None
     image_key: str | None = None
+    image_bytes: bytes | None = None
     content_zh: str = ""
     block_id: int | None = None
 
@@ -377,6 +379,35 @@ def _table_cells_to_html(data: Any) -> str:
     return "\n".join(lines)
 
 
+def _docling_image_bytes(item: Any) -> bytes | None:
+    for key in ("image_bytes", "image", "picture", "data"):
+        value = _value_from_any(item, (key,))
+        if isinstance(value, bytes):
+            return value
+        if isinstance(value, str):
+            if value.startswith("data:image"):
+                value = value.split(",", 1)[-1]
+            try:
+                return base64.b64decode(value, validate=False)
+            except Exception:
+                pass
+
+    for method_name in ("get_image", "get_pil_image", "image"):
+        method = getattr(item, method_name, None)
+        if not callable(method):
+            continue
+        try:
+            image = method()
+            save = getattr(image, "save", None)
+            if callable(save):
+                buffer = BytesIO()
+                save(buffer, format="PNG")
+                return buffer.getvalue()
+        except Exception:
+            pass
+    return None
+
+
 def _docling_content_for_item(item: Any, block_type: str, ref_lookup: dict[str, dict[str, Any]]) -> str:
     if block_type == "table":
         for method_name in ("export_to_html", "export_to_markdown"):
@@ -445,7 +476,8 @@ def _docling_to_blocks(document: Any, exported: dict[str, Any], user_id: int, pa
         bbox = _extract_docling_bbox(item, page_num)
         if page_num is None or bbox is None:
             logger.warning(f"[parse] Docling block missing page_num/bbox paper_id={paper_id} type={block_type}")
-        blocks.append(Block(block_type=block_type, content=content, page_num=page_num, bbox=bbox))
+        image_bytes = _docling_image_bytes(item) if block_type == "figure" else None
+        blocks.append(Block(block_type=block_type, content=content, page_num=page_num, bbox=bbox, image_bytes=image_bytes))
 
     blocks.sort(key=lambda block: (
         block.page_num or 10**9,
@@ -569,6 +601,16 @@ async def _parse_document(
                 raise RuntimeError("MinerU fallback returned no blocks") from exc
             return blocks, metadata
         raise
+
+
+async def _upload_docling_figures(blocks: list[Block], user_id: int, paper_id: int) -> None:
+    for index, block in enumerate(blocks, start=1):
+        if block.block_type != "figure" or block.image_key or not block.image_bytes:
+            continue
+        try:
+            block.image_key = await upload_figure(user_id, paper_id, f"docling-figure-{index}.png", block.image_bytes)
+        except Exception as exc:  # noqa: BLE001 - figure upload should not drop parsed text.
+            logger.warning(f"[parse] Docling figure upload failed paper_id={paper_id} index={index}: {exc}")
 
 
 async def _describe_figures(blocks: list[Block]) -> None:
@@ -767,6 +809,7 @@ async def parse_paper(
     if pdf_bytes is None:
         pdf_bytes = await download_pdf(pdf_key)
     blocks, metadata = await _parse_document(pdf_key, pdf_bytes, user_id, paper_id)
+    await _upload_docling_figures(blocks, user_id, paper_id)
 
     vlm_task = asyncio.create_task(_describe_figures(blocks))
 

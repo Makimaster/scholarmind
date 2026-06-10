@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncGenerator
 from typing import Any
 
@@ -73,11 +74,14 @@ async def chunks_to_citations(chunks: list[Chunk], user_id: int) -> list[dict[st
     titles = await _paper_titles(user_id, {chunk.paper_id for chunk in chunks if chunk.paper_id})
     citations: list[dict[str, Any]] = []
     for chunk in chunks:
+        page = chunk.page_num or 0
         citations.append(
             {
                 "paper_id": chunk.paper_id,
                 "paper_title": titles.get(chunk.paper_id, f"Paper {chunk.paper_id}"),
-                "page_num": chunk.page_num or 0,
+                "page": page,
+                "page_num": page,
+                "chunk_id": chunk.id,
                 "bbox": chunk.bbox or "",
                 "chunk_type": chunk.chunk_type,
                 "content": chunk.content_zh or chunk.content_en,
@@ -223,6 +227,7 @@ async def stream_chat_query(
         fallback = "检索或生成过程中出现错误，请稍后重试或缩小检索范围。"
         await memory.save_message(user_id, conversation_id, "user", question)
         await memory.save_message(user_id, conversation_id, "assistant", fallback, citations=[])
+        yield sse_event("error", {"msg": str(exc)})
         yield sse_event("token", {"delta": fallback})
         yield sse_event("done", {"latency_ms": latency_ms, "error": str(exc)})
 
