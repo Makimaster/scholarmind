@@ -111,10 +111,11 @@ async def _save_query_log(
     chunks: list[Chunk],
     latency_ms: int,
     answer: str,
-) -> None:
+) -> int | None:
+    """Write query_log and return the inserted id for precise feedback binding."""
     try:
         async with MySQLSessionLocal() as session:
-            await session.execute(
+            result = await session.execute(
                 text(
                     """
                     INSERT INTO query_logs (
@@ -139,8 +140,10 @@ async def _save_query_log(
                 },
             )
             await session.commit()
+            return int(result.lastrowid) if result.lastrowid else None
     except Exception as exc:  # noqa: BLE001 - logging failure must not break SSE response.
         logger.warning(f"[chat_agent] query log write failed: {exc}")
+        return None
 
 
 async def _yield_text(text: str) -> AsyncGenerator[str, None]:
@@ -154,6 +157,22 @@ async def _direct_answer(question: str, history: list[dict[str, str]]) -> str:
     return await chat_complete(prompt, max_tokens=1024)
 
 
+async def _self_rag_reflect(answer: str, context: str) -> str:
+    """Run self-RAG reflection to filter unsupported claims; returns revised answer."""
+    try:
+        from common.prompts import load_prompt, render_prompt
+        from common.clients.llm import chat_complete_json
+        prompt = render_prompt(load_prompt("self_rag_reflect"), answer=answer, context=context[:6000])
+        data = await chat_complete_json(prompt, max_tokens=settings.LLM_MAX_TOKENS)
+        if isinstance(data, dict):
+            revised = data.get("revised_answer")
+            if revised and str(revised).strip():
+                return str(revised).strip()
+    except Exception as exc:  # noqa: BLE001 - self-rag failure must not break the SSE stream.
+        logger.warning(f"[chat_agent] self_rag_reflect failed: {exc}")
+    return answer
+
+
 async def _rag_answer(
     question: str,
     history: list[dict[str, str]],
@@ -162,13 +181,16 @@ async def _rag_answer(
     query_bundle = await optimize_query(question, history)
     chunks = await retrieve(question, scope, conversation_history=history, query_bundle=query_bundle)
     citations = await chunks_to_citations(chunks, scope.user_id)
+    context = chunks_to_context(chunks, citations)
     prompt = render_prompt(
         load_prompt("answer_with_citation"),
         question=question,
         history=history_to_text(history),
-        context=chunks_to_context(chunks, citations),
+        context=context,
     )
     answer = await chat_complete(prompt, max_tokens=settings.LLM_MAX_TOKENS)
+    if settings.ENABLE_SELF_RAG_REFLECT:
+        answer = await _self_rag_reflect(answer, context)
     return answer, chunks, citations, query_bundle.rewritten
 
 
@@ -211,7 +233,7 @@ async def stream_chat_query(
         latency_ms = int((time.perf_counter() - started) * 1000)
         await memory.save_message(user_id, conversation_id, "user", question)
         await memory.save_message(user_id, conversation_id, "assistant", answer, citations=citations)
-        await _save_query_log(
+        query_log_id = await _save_query_log(
             user_id=user_id,
             conversation_id=conversation_id,
             question=question,
@@ -220,7 +242,7 @@ async def stream_chat_query(
             latency_ms=latency_ms,
             answer=answer,
         )
-        yield sse_event("done", {"latency_ms": latency_ms, "intent": intent})
+        yield sse_event("done", {"latency_ms": latency_ms, "intent": intent, "query_log_id": query_log_id})
     except Exception as exc:  # noqa: BLE001 - convert failures to SSE error + done.
         logger.exception(f"[chat_agent] chat query failed: {exc}")
         latency_ms = int((time.perf_counter() - started) * 1000)

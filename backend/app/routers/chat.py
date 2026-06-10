@@ -195,19 +195,30 @@ async def message_feedback(data: FeedbackRequest, user_id: CurrentUserId = None)
 
     feedback = 1 if data.is_positive else -1
     async with MySQLSessionLocal() as session:
-        result = await session.execute(
-            text(
-                """
-                UPDATE query_logs
-                SET feedback = :feedback
-                WHERE user_id = :user_id
-                  AND conversation_id = :conversation_id
-                ORDER BY created_at DESC, id DESC
-                LIMIT 1
-                """
-            ),
-            {"feedback": feedback, "user_id": user_id, "conversation_id": int(message["conversation_id"])},
-        )
+        if data.query_log_id is not None:
+            # Precise binding: update the exact query_log row the client knows about.
+            result = await session.execute(
+                text(
+                    "UPDATE query_logs SET feedback = :feedback "
+                    "WHERE id = :id AND user_id = :user_id"
+                ),
+                {"feedback": feedback, "id": data.query_log_id, "user_id": user_id},
+            )
+        else:
+            # Fallback: update the most recent query_log in this conversation.
+            result = await session.execute(
+                text(
+                    """
+                    UPDATE query_logs
+                    SET feedback = :feedback
+                    WHERE user_id = :user_id
+                      AND conversation_id = :conversation_id
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT 1
+                    """
+                ),
+                {"feedback": feedback, "user_id": user_id, "conversation_id": int(message["conversation_id"])},
+            )
         await session.commit()
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Query log not found")

@@ -45,6 +45,7 @@ class FeedbackRequest(BaseModel):
     message_id: int
     is_positive: bool
     reason: Optional[str] = None
+    query_log_id: Optional[int] = None  # precise binding; if absent falls back to latest log in conversation
 
 class FeedbackResponse(BaseModel):
     status: str
