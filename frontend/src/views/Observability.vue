@@ -19,9 +19,9 @@
 
       <div class="content-body">
         <div class="metrics-grid">
+          <div class="metric-card"><span>总文献量</span><strong>{{ store.paperCount }}</strong></div>
           <div class="metric-card"><span>总问答数</span><strong>{{ store.totalQueries }}</strong></div>
-          <div class="metric-card"><span>平均延迟</span><strong>{{ store.averageLatency }}ms</strong></div>
-          <div class="metric-card"><span>平均 Token</span><strong>{{ store.averageTokens }}</strong></div>
+          <div class="metric-card"><span>平均延迟</span><strong>{{ Math.round(store.averageLatency) }}ms</strong></div>
           <div class="metric-card"><span>导入成功率</span><strong>{{ store.successRate }}%</strong></div>
         </div>
 

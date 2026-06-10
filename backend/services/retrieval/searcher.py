@@ -221,12 +221,13 @@ async def _retrieve_once(
     scope: RetrievalScope,
     top_k: int,
     conversation_history: str | list | None = None,
+    query_bundle: QueryBundle | None = None,
 ) -> list[Chunk]:
     from services.retrieval.reranker import corrective_grade, rerank_chunks
 
-    query_bundle = await optimize_query(query, conversation_history)
-    candidates = await hybrid_search(query_bundle, scope, top_k)
-    reranked = await rerank_chunks(query_bundle.rewritten or query, candidates, settings.RERANK_TOP_N)
+    bundle = query_bundle or await optimize_query(query, conversation_history)
+    candidates = await hybrid_search(bundle, scope, top_k)
+    reranked = await rerank_chunks(bundle.rewritten or query, candidates, settings.RERANK_TOP_N)
     return await corrective_grade(query, reranked)
 
 
@@ -236,6 +237,7 @@ async def retrieve(
     top_k: int | None = None,
     conversation_history: str | list | None = None,
     _retry_used: bool = False,
+    query_bundle: QueryBundle | None = None,
 ) -> list[Chunk]:
     """Retrieve top chunks for a question within a tenant-safe scope."""
     top_k = top_k or settings.RETRIEVAL_TOP_K
@@ -248,7 +250,7 @@ async def retrieve(
             return cached
         logger.info(f"[retrieval] cache miss key={key}")
 
-    chunks = await _retrieve_once(query, scope, top_k, conversation_history)
+    chunks = await _retrieve_once(query, scope, top_k, conversation_history, query_bundle=query_bundle)
 
     if settings.ENABLE_CORRECTIVE_RAG and len(chunks) < MIN_CORRECTIVE_CHUNKS:
         if _retry_used:

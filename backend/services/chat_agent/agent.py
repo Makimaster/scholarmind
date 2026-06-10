@@ -1,9 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
-import time
 from collections.abc import AsyncGenerator
-from dataclasses import asdict
 from typing import Any
 
 from sqlalchemy import text
@@ -12,11 +11,11 @@ from common.clients.llm import chat_complete, chat_complete_json
 from common.config import settings
 from common.db.mysql import AsyncSessionLocal as MySQLSessionLocal
 from common.logging import logger
+from common.prompts import load_prompt, render_prompt
 from services.chat_agent import memory
 from services.retrieval import Chunk, RetrievalScope, retrieve
-from services.retrieval.query_optimizer import _load_prompt, _render_prompt
+from services.retrieval.query_optimizer import optimize_query
 
-DEFAULT_USER_ID = 999
 
 
 def sse_event(event: str, payload: dict[str, Any]) -> str:
@@ -38,7 +37,7 @@ def build_scope(user_id: int, scope_type: str, folder_id: int | None, paper_ids:
 async def route_intent(question: str, history: list[dict[str, str]]) -> str:
     if not settings.ENABLE_INTENT_ROUTER:
         return "knowledge"
-    prompt = _render_prompt(_load_prompt("intent_router"), question=question, history=history_to_text(history))
+    prompt = render_prompt(load_prompt("intent_router"), question=question, history=history_to_text(history))
     try:
         data = await chat_complete_json(prompt, max_tokens=256)
         intent = str(data.get("intent") or "knowledge").lower()
@@ -104,6 +103,7 @@ async def _save_query_log(
     user_id: int,
     conversation_id: int | None,
     question: str,
+    rewritten_query: str | None,
     chunks: list[Chunk],
     latency_ms: int,
     answer: str,
@@ -114,10 +114,10 @@ async def _save_query_log(
                 text(
                     """
                     INSERT INTO query_logs (
-                        user_id, conversation_id, question, retrieved_chunk_ids,
+                        user_id, conversation_id, question, rewritten_query, retrieved_chunk_ids,
                         top_k, latency_ms, prompt_tokens, completion_tokens
                     ) VALUES (
-                        :user_id, :conversation_id, :question, :retrieved_chunk_ids,
+                        :user_id, :conversation_id, :question, :rewritten_query, :retrieved_chunk_ids,
                         :top_k, :latency_ms, :prompt_tokens, :completion_tokens
                     )
                     """
@@ -126,6 +126,7 @@ async def _save_query_log(
                     "user_id": user_id,
                     "conversation_id": conversation_id,
                     "question": question,
+                    "rewritten_query": rewritten_query,
                     "retrieved_chunk_ids": json.dumps([chunk.id for chunk in chunks], ensure_ascii=False),
                     "top_k": len(chunks),
                     "latency_ms": latency_ms,
@@ -149,17 +150,22 @@ async def _direct_answer(question: str, history: list[dict[str, str]]) -> str:
     return await chat_complete(prompt, max_tokens=1024)
 
 
-async def _rag_answer(question: str, history: list[dict[str, str]], scope: RetrievalScope) -> tuple[str, list[Chunk], list[dict[str, Any]]]:
-    chunks = await retrieve(question, scope, conversation_history=history)
+async def _rag_answer(
+    question: str,
+    history: list[dict[str, str]],
+    scope: RetrievalScope,
+) -> tuple[str, list[Chunk], list[dict[str, Any]], str | None]:
+    query_bundle = await optimize_query(question, history)
+    chunks = await retrieve(question, scope, conversation_history=history, query_bundle=query_bundle)
     citations = await chunks_to_citations(chunks, scope.user_id)
-    prompt = _render_prompt(
-        _load_prompt("answer_with_citation"),
+    prompt = render_prompt(
+        load_prompt("answer_with_citation"),
         question=question,
         history=history_to_text(history),
         context=chunks_to_context(chunks, citations),
     )
     answer = await chat_complete(prompt, max_tokens=settings.LLM_MAX_TOKENS)
-    return answer, chunks, citations
+    return answer, chunks, citations, query_bundle.rewritten
 
 
 async def stream_chat_query(
@@ -178,6 +184,7 @@ async def stream_chat_query(
     chunks: list[Chunk] = []
     citations: list[dict[str, Any]] = []
     answer = ""
+    rewritten_query: str | None = None
 
     try:
         if intent == "complex":
@@ -190,7 +197,7 @@ async def stream_chat_query(
         if intent == "chitchat":
             answer = await _direct_answer(question, history)
         else:
-            answer, chunks, citations = await _rag_answer(question, history, scope)
+            answer, chunks, citations, rewritten_query = await _rag_answer(question, history, scope)
             for citation in citations:
                 yield sse_event("cite", citation)
 
@@ -204,6 +211,7 @@ async def stream_chat_query(
             user_id=user_id,
             conversation_id=conversation_id,
             question=question,
+            rewritten_query=rewritten_query,
             chunks=chunks,
             latency_ms=latency_ms,
             answer=answer,

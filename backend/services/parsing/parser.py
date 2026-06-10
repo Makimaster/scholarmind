@@ -25,6 +25,7 @@ from common.clients.llm import chat_complete_json, vlm_describe_image
 from common.clients.minio import download_pdf, presigned_get_url, upload_figure
 from common.config import settings
 from common.logging import logger
+from common.prompts import load_prompt
 
 
 @dataclass
@@ -47,12 +48,6 @@ class ParseResult:
     title: str = ""
     abstract: str = ""
 
-
-def _load_prompt(name: str) -> str:
-    path = Path(__file__).parents[3] / "prompts" / f"{name}.md"
-    text_content = path.read_text(encoding="utf-8")
-    match = re.search(r"```\s*\n(.*?)\n```", text_content, re.DOTALL)
-    return match.group(1) if match else text_content
 
 
 def _first_value(data: dict[str, Any], keys: tuple[str, ...], default: Any = None) -> Any:
@@ -608,7 +603,7 @@ async def _extract_refs_llm(blocks: list[Block]) -> list[dict]:
     if len(references_text) < 50:
         return []
 
-    prompt_template = _load_prompt("extract_references")
+    prompt_template = load_prompt("extract_references")
     prompt = prompt_template.format(references_text=references_text[:8000])
 
     try:

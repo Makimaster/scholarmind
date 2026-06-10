@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from collections.abc import AsyncGenerator
-from typing import Any
 
 from common.clients.llm import chat_complete, chat_complete_json
 from common.config import settings
+from common.db.mysql import AsyncSessionLocal as MySQLSessionLocal
 from common.logging import logger
+from common.prompts import load_prompt, render_prompt
+from sqlalchemy import text
 from services.chat_agent import memory
 from services.retrieval import Chunk, RetrievalScope, retrieve
-from services.retrieval.query_optimizer import _load_prompt, _render_prompt
 from services.chat_agent.agent import chunks_to_citations, chunks_to_context, sse_event
 
 
@@ -46,6 +48,49 @@ def _dedupe_chunks(groups: list[list[Chunk]], limit: int = 12) -> list[Chunk]:
     return merged
 
 
+async def _save_query_log(
+    *,
+    user_id: int,
+    conversation_id: int | None,
+    topic: str,
+    chunks: list[Chunk],
+    latency_ms: int,
+    answer: str,
+) -> None:
+    try:
+        async with MySQLSessionLocal() as session:
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO query_logs (
+                        user_id, conversation_id, question, rewritten_query, retrieved_chunk_ids,
+                        top_k, latency_ms, prompt_tokens, completion_tokens
+                    ) VALUES (
+                        :user_id, :conversation_id, :question, NULL, :retrieved_chunk_ids,
+                        :top_k, :latency_ms, :prompt_tokens, :completion_tokens
+                    )
+                    """
+                ),
+                {
+                    "user_id": user_id,
+                    "conversation_id": conversation_id,
+                    "question": topic,
+                    "retrieved_chunk_ids": json.dumps([chunk.id for chunk in chunks], ensure_ascii=False),
+                    "top_k": len(chunks),
+                    "latency_ms": latency_ms,
+                    "prompt_tokens": max(1, len(topic) // 2),
+                    "completion_tokens": max(1, len(answer) // 2),
+                },
+            )
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001 - logging failure must not break SSE response.
+        logger.warning(f"[reviewer] query log write failed: {exc}")
+
+
+def _citations_json(chunk_ids: list[Chunk]) -> str:
+    return "[]" if not chunk_ids else str([chunk.id for chunk in chunk_ids])
+
+
 async def generate_review(
     topic: str,
     scope: RetrievalScope,
@@ -63,8 +108,8 @@ async def generate_review(
         for citation in citations:
             yield sse_event("cite", citation)
 
-        prompt = _render_prompt(
-            _load_prompt("review_generation"),
+        prompt = render_prompt(
+            load_prompt("review_generation"),
             topic=topic,
             papers_context=chunks_to_context(chunks, citations),
             min_citations=min(3, max(1, len(citations))),
@@ -77,6 +122,14 @@ async def generate_review(
         if conversation_id is not None:
             await memory.save_message(user_id, conversation_id, "user", topic)
             await memory.save_message(user_id, conversation_id, "assistant", answer, citations=citations)
+        await _save_query_log(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            topic=topic,
+            chunks=chunks,
+            latency_ms=latency_ms,
+            answer=answer,
+        )
         yield sse_event("done", {"latency_ms": latency_ms, "subquestions": subquestions})
     except Exception as exc:  # noqa: BLE001 - keep SSE contract on failure.
         logger.exception(f"[reviewer] review generation failed: {exc}")
@@ -85,13 +138,19 @@ async def generate_review(
         if conversation_id is not None:
             await memory.save_message(user_id, conversation_id, "user", topic)
             await memory.save_message(user_id, conversation_id, "assistant", fallback, citations=[])
+        await _save_query_log(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            topic=topic,
+            chunks=[],
+            latency_ms=latency_ms,
+            answer=fallback,
+        )
         yield sse_event("token", {"delta": fallback})
         yield sse_event("done", {"latency_ms": latency_ms, "error": str(exc)})
 
 
 async def asyncio_gather_retrieve(subquestions: list[str], scope: RetrievalScope) -> list[list[Chunk]]:
-    import asyncio
-
     results = await asyncio.gather(
         *(retrieve(question, scope) for question in subquestions),
         return_exceptions=True,

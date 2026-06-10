@@ -12,7 +12,7 @@ from typing import Any
 from common.clients.llm import chat_complete
 from common.config import settings
 from common.logging import logger
-
+from common.prompts import load_prompt, render_prompt
 
 @dataclass(frozen=True)
 class QueryBundle:
@@ -22,20 +22,6 @@ class QueryBundle:
     hyde_doc: str
 
 
-def _load_prompt(name: str) -> str:
-    """Load a prompt from the project-level prompts directory."""
-    prompt_path = Path(__file__).parents[3] / "prompts" / f"{name}.md"
-    text = prompt_path.read_text(encoding="utf-8")
-    match = re.search(r"```\s*\n(.*?)\n```", text, re.DOTALL)
-    return match.group(1) if match else text
-
-
-def _render_prompt(template: str, **values: Any) -> str:
-    """Render known placeholders without interpreting JSON braces in prompts."""
-    rendered = template
-    for key, value in values.items():
-        rendered = rendered.replace("{" + key + "}", str(value or ""))
-    return rendered
 
 
 def _history_to_text(conversation_history: str | list | None) -> str:
@@ -73,19 +59,19 @@ async def optimize_query(
     async def rewrite() -> str:
         if not settings.ENABLE_QUERY_REWRITE:
             return question
-        prompt = _render_prompt(_load_prompt("query_rewrite"), question=question, history=history)
+        prompt = render_prompt(load_prompt("query_rewrite"), question=question, history=history)
         return await _safe_completion("rewrite", prompt, question)
 
     async def translate() -> str:
         if not settings.ENABLE_QUERY_TRANSLATION:
             return question
-        prompt = _render_prompt(_load_prompt("query_translate"), question=question)
+        prompt = render_prompt(load_prompt("query_translate"), question=question)
         return await _safe_completion("translate", prompt, question)
 
     async def hyde() -> str:
         if not settings.ENABLE_HYDE:
             return question
-        prompt = _render_prompt(_load_prompt("hyde"), question=question)
+        prompt = render_prompt(load_prompt("hyde"), question=question)
         return await _safe_completion("hyde", prompt, question)
 
     rewritten, translated_en, hyde_doc = await asyncio.gather(rewrite(), translate(), hyde())

@@ -21,7 +21,8 @@ async def list_ingestion_tasks(limit: int = 50, user_id: CurrentUserId = None): 
                 """
                 SELECT t.id, t.paper_id, COALESCE(p.title, t.file_name) AS title,
                        t.file_name, COALESCE(p.status, t.stage) AS status,
-                       t.stage, t.progress, t.error_msg, t.started_at, t.created_at
+                       t.stage, t.progress, t.error_msg, t.started_at, t.created_at,
+                       COALESCE(t.finished_at, t.created_at) AS updated_at
                 FROM ingest_tasks t LEFT JOIN papers p ON p.id = t.paper_id AND p.user_id = t.user_id
                 WHERE t.user_id = :user_id
                 ORDER BY t.created_at DESC, t.id DESC
@@ -72,18 +73,19 @@ async def list_query_logs(limit: int = 10, offset: int = 0, user_id: CurrentUser
 
 
 @router.get("/logs/access", response_model=List[AccessLogResponse], summary="访问日志")
-async def list_access_logs(limit: int = 10, offset: int = 0):
+async def list_access_logs(limit: int = 10, offset: int = 0, user_id: CurrentUserId = None):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             text(
                 """
                 SELECT id, user_id, path, method, status_code, COALESCE(ip, '') AS ip_address, created_at
                 FROM access_logs
+                WHERE (:user_id IS NULL OR user_id = :user_id)
                 ORDER BY created_at DESC, id DESC
                 LIMIT :limit OFFSET :offset
                 """
             ),
-            {"limit": limit, "offset": offset},
+            {"user_id": user_id, "limit": limit, "offset": offset},
         )
         return [AccessLogResponse(**dict(row)) for row in result.mappings()]
 

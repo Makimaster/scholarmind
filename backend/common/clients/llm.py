@@ -13,6 +13,14 @@ from openai import AsyncOpenAI
 from common.config import settings
 from common.logging import logger
 
+LLM_TIMEOUT = 120
+LLM_MAX_RETRIES = 2
+EMBED_TIMEOUT = 60
+EMBED_MAX_RETRIES = 2
+VLM_TIMEOUT = 60
+VLM_MAX_RETRIES = 2
+RERANK_TIMEOUT = 30
+
 
 # ---------------------------------------------------------------------------
 # Client singletons
@@ -22,8 +30,8 @@ def _llm_client() -> AsyncOpenAI:
     return AsyncOpenAI(
         base_url=settings.LLM_BASE_URL,
         api_key=settings.LLM_API_KEY,
-        timeout=120,
-        max_retries=2,
+        timeout=LLM_TIMEOUT,
+        max_retries=LLM_MAX_RETRIES,
     )
 
 
@@ -31,8 +39,8 @@ def _embedding_client() -> AsyncOpenAI:
     return AsyncOpenAI(
         base_url=settings.EMBEDDING_BASE_URL,
         api_key=settings.EMBEDDING_API_KEY or "none",
-        timeout=60,
-        max_retries=2,
+        timeout=EMBED_TIMEOUT,
+        max_retries=EMBED_MAX_RETRIES,
     )
 
 
@@ -94,8 +102,8 @@ async def vlm_describe_image(image_url: str, caption: str = "") -> str:
     client = AsyncOpenAI(
         base_url=settings.VLM_BASE_URL,
         api_key=settings.VLM_API_KEY,
-        timeout=60,
-        max_retries=2,
+        timeout=VLM_TIMEOUT,
+        max_retries=VLM_MAX_RETRIES,
     )
     resp = await client.chat.completions.create(
         model=settings.VLM_MODEL,
@@ -108,7 +116,7 @@ async def vlm_describe_image(image_url: str, caption: str = "") -> str:
                 ],
             }
         ],
-        max_tokens=256,
+        max_tokens=256,  # VLM image description max tokens
     )
     return resp.choices[0].message.content or ""
 
@@ -151,7 +159,7 @@ async def rerank(query: str, documents: list[str], top_n: int | None = None) -> 
 
 
 async def _rerank_dashscope(query: str, documents: list[str], top_n: int) -> list[dict]:
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=RERANK_TIMEOUT) as client:
         resp = await client.post(
             f"{settings.RERANK_BASE_URL}/rerank",
             headers={
@@ -174,7 +182,7 @@ async def _rerank_dashscope(query: str, documents: list[str], top_n: int) -> lis
 
 
 async def _rerank_tei(query: str, documents: list[str], top_n: int) -> list[dict]:
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=RERANK_TIMEOUT) as client:
         resp = await client.post(
             settings.RERANK_BASE_URL,
             json={"query": query, "texts": documents, "truncate": True},

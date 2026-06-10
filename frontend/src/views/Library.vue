@@ -108,7 +108,7 @@
                   <td class="paper-title" @click="openPaper(paper)">
                     {{ paper.title }}
                   </td>
-                  <td>{{ paper.authors || "未知" }}</td>
+                  <td>{{ formatAuthors(paper.authors) }}</td>
                   <td>{{ paper.year || "-" }}</td>
                   <td>
                     <span :class="['status-badge', paper.status]">{{
@@ -224,6 +224,18 @@ const confirmModal = ref({
   message: "",
   onConfirm: null as (() => void) | null,
 });
+
+function formatAuthors(authors: unknown): string {
+  if (!authors) return '未知';
+  if (Array.isArray(authors)) return authors.join(', ');
+  if (typeof authors === 'string') {
+    try {
+      const parsed = JSON.parse(authors);
+      return Array.isArray(parsed) ? parsed.join(', ') : authors;
+    } catch { return authors; }
+  }
+  return String(authors);
+}
 
 const statusMap: Record<string, string> = {
   queued: "排队中",

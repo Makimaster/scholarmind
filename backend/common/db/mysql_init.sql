@@ -29,13 +29,13 @@ CREATE TABLE IF NOT EXISTS papers (
   year         INT NULL,
   doi          VARCHAR(128) NULL,
   arxiv_id     VARCHAR(64)  NULL,
-  source       VARCHAR(16)  NOT NULL DEFAULT 'upload',
+  source       VARCHAR(16)  NOT NULL DEFAULT 'upload', -- upload | arxiv
   lang         VARCHAR(8)   NULL,
   file_hash    CHAR(16)     NOT NULL,
   pdf_key      VARCHAR(256) NOT NULL,
   num_pages    INT NULL,
   chunk_count  INT NOT NULL DEFAULT 0,
-  status       VARCHAR(16)  NOT NULL DEFAULT 'pending', -- pending|done|failed
+  status       VARCHAR(16)  NOT NULL DEFAULT 'pending', -- pending|queued|parsing|indexing|done|failed
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY uk_user_filehash (user_id, file_hash),
   INDEX idx_papers_user (user_id),
@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS ingest_tasks (
   started_at  DATETIME NULL,
   finished_at DATETIME NULL,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_task_batch (batch_id),
   INDEX idx_task_user_stage (user_id, stage)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

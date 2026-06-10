@@ -15,17 +15,19 @@ import re
 from pathlib import Path
 
 from common.clients.llm import chat_complete, chat_complete_json
+from common.config import settings
 from common.logging import logger
+from common.prompts import load_prompt, render_prompt
 from services.indexing.chunker import Chunk
 
-_BATCH_SIZE = 8
+_ENRICH_BATCH_SIZE = 8
+_TEXT_SUMMARY_MAX_TOKENS = 256
+DEFAULT_PROMPT_DIR = Path(__file__).parents[3] / "prompts"
+
 
 
 def _load_prompt(name: str) -> str:
-    path = Path(__file__).parents[3] / "prompts" / f"{name}.md"
-    text = path.read_text(encoding="utf-8")
-    match = re.search(r"```\s*\n(.*?)\n```", text, re.DOTALL)
-    return match.group(1) if match else text
+    return load_prompt(name)
 
 
 def _is_english(text: str) -> bool:
@@ -92,8 +94,8 @@ async def enrich_chunks(chunks: list[Chunk]) -> list[Chunk]:
             if not c.content_zh:
                 c.content_zh = c.content_en
 
-    for i in range(0, len(text_chunks), _BATCH_SIZE):
-        batch = text_chunks[i : i + _BATCH_SIZE]
+    for i in range(0, len(text_chunks), _ENRICH_BATCH_SIZE):
+        batch = text_chunks[i : i + _ENRICH_BATCH_SIZE]
         await asyncio.gather(*[_enrich_text(c) for c in batch])
 
     for i in range(0, len(table_chunks), _BATCH_SIZE):

@@ -110,6 +110,7 @@ CREATE TABLE ingest_tasks (
   started_at  DATETIME NULL,
   finished_at DATETIME NULL,
   created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   INDEX idx_task_batch (batch_id),
   INDEX idx_task_user_stage (user_id, stage)
 );

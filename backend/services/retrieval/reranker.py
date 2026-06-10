@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from common.clients.llm import chat_complete_json, rerank
 from common.config import settings
 from common.logging import logger
-from services.retrieval.query_optimizer import _load_prompt, _render_prompt
+from common.prompts import load_prompt, render_prompt
 
 if TYPE_CHECKING:
     from services.retrieval.searcher import Chunk
@@ -85,11 +85,11 @@ async def corrective_grade(question: str, chunks: list["Chunk"]) -> list["Chunk"
     if not settings.ENABLE_CORRECTIVE_RAG or not chunks:
         return chunks
 
-    prompt_template = _load_prompt("corrective_grade")
+    prompt_template = load_prompt("corrective_grade")
     graded: list[Chunk] = []
     for chunk in chunks:
         context = _chunk_document(chunk)[:3000]
-        prompt = _render_prompt(prompt_template, question=question, context=context)
+        prompt = render_prompt(prompt_template, question=question, context=context)
         try:
             data = await chat_complete_json(prompt, max_tokens=512)
             score = _grade_to_score(data)

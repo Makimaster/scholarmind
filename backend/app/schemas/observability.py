@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic import BaseModel
 from typing import Optional, List, Any
 from datetime import datetime
@@ -27,6 +29,7 @@ class IngestionTaskResponse(BaseModel):
     error_msg: Optional[str] = None
     started_at: Optional[datetime] = None
     created_at: datetime
+    updated_at: datetime
 
 
 class AccessLogResponse(BaseModel):

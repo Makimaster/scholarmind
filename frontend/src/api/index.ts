@@ -34,10 +34,12 @@ export interface IngestionTask {
   error_msg?: string | null;
   started_at?: string | null;
   created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface QueryLog {
   id: number;
+  user_id?: number;
   question: string;
   rewritten_query?: string | null;
   latency_ms: number;
@@ -46,6 +48,13 @@ export interface QueryLog {
   retrieved_chunk_ids?: string[];
   feedback?: number | null;
   created_at: string;
+}
+
+export interface SystemStats {
+  paper_count: number;
+  chunk_count: number;
+  total_queries: number;
+  average_latency_ms: number;
 }
 
 export const authApi = {
@@ -140,7 +149,7 @@ export const observabilityApi = {
     return data;
   },
   async stats() {
-    const { data } = await api.get('/stats/overview');
+    const { data } = await api.get<SystemStats>('/stats/overview');
     return data;
   },
 };

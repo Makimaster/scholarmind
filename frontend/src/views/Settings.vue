@@ -31,7 +31,11 @@
       </header>
 
       <div class="content-body">
-        <form @submit.prevent="saveSettings" class="settings-form">
+        <div v-if="savedBanner" class="saved-banner" @click="dismissBanner">
+      <span>⚠️ 配置仅在本地生效，暂不同步到服务端。点击关闭。</span>
+      <button class="dismiss-btn">×</button>
+    </div>
+    <form @submit.prevent="saveSettings" class="settings-form">
           <!-- Card: Model Services -->
           <div class="settings-card">
             <h3>🤖 大模型与向量服务接入</h3>
@@ -177,6 +181,9 @@ const router = useRouter();
 const authStore = useAuthStore();
 
 const saving = ref(false);
+const savedBanner = ref(false);
+
+function dismissBanner() { savedBanner.value = false; }
 
 const config = reactive({
   LLM_PROVIDER: 'qwen',
@@ -207,6 +214,8 @@ async function saveSettings() {
   saving.value = true;
   try {
     await settingsApi.save(config as unknown as Record<string, unknown>);
+    savedBanner.value = true;
+    setTimeout(() => { savedBanner.value = false; }, 5000);
   } finally {
     saving.value = false;
   }
@@ -478,5 +487,27 @@ async function saveSettings() {
 .save-btn:disabled {
   background-color: #c2cdc6;
   cursor: not-allowed;
+}
+
+.saved-banner {
+  max-width: 800px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  background: #fff7dd;
+  border: 1px solid #f5d76e;
+  border-radius: 8px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  font-size: 13px;
+  color: #7a5a00;
+}
+.saved-banner .dismiss-btn {
+  border: 0;
+  background: transparent;
+  font-size: 18px;
+  cursor: pointer;
+  color: #7a5a00;
 }
 </style>
