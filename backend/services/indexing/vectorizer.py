@@ -32,24 +32,34 @@ def _bm25_sparse(chunks: list[Chunk]) -> list[dict[int, float]]:
 
     corpus = [_tokenize(c.content_en) for c in chunks]
     if not any(corpus):
-        return [{} for _ in chunks]
+        return [{0: 0.0} for _ in chunks]
 
     bm25 = BM25Okapi(corpus)
+    avgdl: float = bm25.avgdl
+    k1: float = bm25.k1
+    b: float = bm25.b
+
     sparse_vecs: list[dict[int, float]] = []
-    for tokens in corpus:
-        if not tokens:
-            sparse_vecs.append({})
+    for doc_tokens in corpus:
+        if not doc_tokens:
+            sparse_vecs.append({0: 0.0})
             continue
-        scores = bm25.get_scores(tokens)
+        dl = len(doc_tokens)
+        # Count term frequency in this document.
+        tf_map: dict[str, int] = {}
+        for t in doc_tokens:
+            tf_map[t] = tf_map.get(t, 0) + 1
+        # Build per-term BM25 score: idf * BM25-TF for each unique token.
         vec: dict[int, float] = {}
-        for token, score in zip(
-            [t for doc in corpus for t in doc],
-            scores,
-        ):
+        for token, tf in tf_map.items():
+            idf = bm25.idf.get(token, 0.0)
+            if idf <= 0:
+                continue
+            score = idf * (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * dl / avgdl))
             if score > 0:
                 tid = _token_id(token)
-                vec[tid] = max(vec.get(tid, 0.0), float(score))
-        sparse_vecs.append(vec)
+                vec[tid] = max(vec.get(tid, 0.0), score)
+        sparse_vecs.append(vec if vec else {0: 0.0})
     return sparse_vecs
 
 

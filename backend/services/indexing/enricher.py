@@ -83,16 +83,32 @@ async def _enrich_table(chunk: Chunk) -> None:
         chunk.content_zh = chunk.content_en[:200]
 
 
+async def _enrich_figure(chunk: Chunk) -> None:
+    """Generate Chinese description for figures lacking a VLM-produced content_zh."""
+    if chunk.content_zh:
+        return
+    try:
+        template = _load_prompt("figure_caption")
+        prompt = template.format(caption=chunk.content_en[:500] or "（无图注）")
+        result = await chat_complete(
+            prompt,
+            system="You are an academic figure describer. Reply in Chinese only.",
+            max_tokens=150,
+        )
+        chunk.content_zh = result.strip() or chunk.content_en[:200]
+    except Exception as e:
+        logger.warning(f"[enricher] figure enrich failed: {e}")
+        chunk.content_zh = chunk.content_en[:200]
+
+
 async def enrich_chunks(chunks: list[Chunk]) -> list[Chunk]:
     text_chunks = [c for c in chunks if c.block_type == "text"]
     table_chunks = [c for c in chunks if c.block_type == "table"]
+    figure_chunks = [c for c in chunks if c.block_type == "figure" and not c.content_zh]
 
     for c in chunks:
         if c.block_type == "formula":
             c.content_zh = c.content_en
-        elif c.block_type == "figure":
-            if not c.content_zh:
-                c.content_zh = c.content_en
 
     for i in range(0, len(text_chunks), _ENRICH_BATCH_SIZE):
         batch = text_chunks[i : i + _ENRICH_BATCH_SIZE]
@@ -101,5 +117,14 @@ async def enrich_chunks(chunks: list[Chunk]) -> list[Chunk]:
     for i in range(0, len(table_chunks), _ENRICH_BATCH_SIZE):
         batch = table_chunks[i : i + _ENRICH_BATCH_SIZE]
         await asyncio.gather(*[_enrich_table(c) for c in batch])
+
+    for i in range(0, len(figure_chunks), _ENRICH_BATCH_SIZE):
+        batch = figure_chunks[i : i + _ENRICH_BATCH_SIZE]
+        await asyncio.gather(*[_enrich_figure(c) for c in batch])
+
+    # Final fallback: any remaining empty content_zh gets content_en.
+    for c in chunks:
+        if not c.content_zh:
+            c.content_zh = c.content_en[:200]
 
     return chunks
