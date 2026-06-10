@@ -78,7 +78,30 @@ let timer: number | undefined;
 
 const stageMap: Record<string, string> = { queued: '排队中', parsing: '解析中', indexing: '索引中', done: '完成', failed: '失败', pending: '等待中' };
 function stageLabel(stage?: string) { return stageMap[stage || ''] || stage || '未知'; }
-function formatTime(value?: string | null) { return value ? new Date(value).toLocaleString() : '-'; }
+function parseBackendTime(value: string) {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value)) {
+    return new Date(`${value}Z`);
+  }
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
+    return new Date(`${value.replace(' ', 'T')}Z`);
+  }
+  return new Date(value);
+}
+function formatTime(value?: string | null) {
+  if (!value) return '-';
+  const date = parseBackendTime(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date);
+}
 
 onMounted(async () => {
   await store.refreshAll();

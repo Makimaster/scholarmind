@@ -119,6 +119,14 @@ async def _handle_ingest_job_async(user_id: int, paper_id: int, pdf_key: str, ta
                 """),
                 {"task_id": task_id, "user_id": user_id},
             )
+            await db.execute(
+                text("""
+                    UPDATE papers
+                    SET status = 'parsing'
+                    WHERE id = :paper_id AND user_id = :user_id
+                """),
+                {"paper_id": paper_id, "user_id": user_id},
+            )
             await db.commit()
 
             parse_result = await parse_paper(user_id, paper_id, pdf_key or str(paper["pdf_key"]), db)
@@ -130,6 +138,14 @@ async def _handle_ingest_job_async(user_id: int, paper_id: int, pdf_key: str, ta
                     WHERE id = :task_id AND user_id = :user_id
                 """),
                 {"task_id": task_id, "user_id": user_id},
+            )
+            await db.execute(
+                text("""
+                    UPDATE papers
+                    SET status = 'indexing'
+                    WHERE id = :paper_id AND user_id = :user_id
+                """),
+                {"paper_id": paper_id, "user_id": user_id},
             )
             await db.commit()
 

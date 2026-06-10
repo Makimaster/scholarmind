@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     EMBEDDING_BASE_URL: Optional[str] = "http://embedding:80/v1"
     EMBEDDING_API_KEY: Optional[str] = ""
     EMBEDDING_DIM: int = 1024
-    EMBEDDING_BATCH: int = 32
+    EMBEDDING_BATCH: int = 10
     # local_path mode parameters
     EMBEDDING_MODEL_PATH: Optional[str] = "/models/bge-m3"
     EMBEDDING_DEVICE: str = "cpu"

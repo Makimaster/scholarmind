@@ -121,7 +121,7 @@ async def embed_texts(texts: list[str]) -> list[list[float]]:
     """Batch embed texts, respecting EMBEDDING_BATCH size."""
     client = _embedding_client()
     results: list[list[float]] = []
-    batch = settings.EMBEDDING_BATCH
+    batch = max(1, min(settings.EMBEDDING_BATCH, 10))
 
     for i in range(0, len(texts), batch):
         chunk = texts[i : i + batch]

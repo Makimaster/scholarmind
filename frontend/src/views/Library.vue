@@ -115,7 +115,7 @@
                       statusMap[paper.status] || paper.status
                     }}</span>
                   </td>
-                  <td>{{ paper.created_at }}</td>
+                  <td>{{ formatBeijingTime(paper.created_at) }}</td>
                   <td>
                     <button
                       class="delete-btn"
@@ -201,7 +201,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed, nextTick } from "vue";
+import { onMounted, onUnmounted, ref, computed, nextTick } from "vue";
 import { useRouter } from "vue-router";
 import { paperApi, foldersApi } from "../api";
 import { useAuthStore } from "../stores/auth";
@@ -226,13 +226,16 @@ const confirmModal = ref({
 });
 
 const statusMap: Record<string, string> = {
+  queued: "排队中",
   pending: "排队中",
   parsing: "解析中",
   indexing: "索引中",
   done: "就绪",
-  failed: "失败",
   completed: "就绪",
+  failed: "失败",
 };
+const activeStatuses = new Set(["queued", "pending", "parsing", "indexing"]);
+let refreshTimer: number | undefined;
 
 const filteredPapers = computed(() =>
   papers.value.filter((p) => {
@@ -251,6 +254,51 @@ async function loadData() {
   const [p, f] = await Promise.all([paperApi.list(), foldersApi.list()]);
   papers.value = p;
   folders.value = f;
+}
+
+function stopRefreshPolling() {
+  if (refreshTimer) {
+    window.clearInterval(refreshTimer);
+    refreshTimer = undefined;
+  }
+}
+
+function hasActivePapers() {
+  return papers.value.some((paper) => activeStatuses.has(String(paper.status || "")));
+}
+
+function startRefreshPolling() {
+  stopRefreshPolling();
+  refreshTimer = window.setInterval(async () => {
+    await loadData();
+    if (!hasActivePapers()) stopRefreshPolling();
+  }, 2000);
+}
+
+function parseBackendTime(value: string) {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?$/.test(value)) {
+    return new Date(`${value}Z`);
+  }
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(value)) {
+    return new Date(`${value.replace(" ", "T")}Z`);
+  }
+  return new Date(value);
+}
+
+function formatBeijingTime(value?: string | null) {
+  if (!value) return "-";
+  const date = parseBackendTime(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function triggerFileSelect() {
@@ -315,13 +363,18 @@ function handleFileSelect(e: Event) {
 async function uploadFiles(files: FileList) {
   await paperApi.upload(Array.from(files), selectedFolderId.value);
   await loadData();
+  startRefreshPolling();
 }
 
 function openPaper(paper: any) {
   // TODO: 后续可以传递 paperId 让后端建立 scoped 会话
   router.push({ path: "/chat", query: { paperId: paper.id } });
 }
-onMounted(loadData);
+onMounted(async () => {
+  await loadData();
+  if (hasActivePapers()) startRefreshPolling();
+});
+onUnmounted(stopRefreshPolling);
 </script>
 
 <style scoped>
@@ -513,6 +566,21 @@ th {
   background: #eef8ea;
   color: #0f7a3a;
   font-size: 12px;
+}
+.status-badge.queued,
+.status-badge.pending {
+  background: #fff7dd;
+  color: #8a5a00;
+}
+.status-badge.parsing,
+.status-badge.indexing {
+  background: #eaf3ff;
+  color: #1f5f9f;
+}
+.status-badge.done,
+.status-badge.completed {
+  background: #eef8ea;
+  color: #0f7a3a;
 }
 .status-badge.failed {
   background: #fff0f0;
