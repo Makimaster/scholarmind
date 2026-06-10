@@ -227,15 +227,23 @@ def _rrf_fuse(route_hits: dict[str, list[dict[str, Any]]], top_k: int) -> list[C
 
 async def hybrid_search(query_bundle: QueryBundle, scope: RetrievalScope, top_k: int) -> list[Chunk]:
     """Run dense and sparse retrieval routes and fuse them with RRF."""
-    results = await asyncio.gather(
+    base_tasks = [
         _dense_route(query_bundle.translated_en, scope, top_k, "en_dense"),
         _dense_zh_route(query_bundle.rewritten, scope, top_k, "zh_dense"),
         _dense_route(query_bundle.hyde_doc, scope, top_k, "hyde_dense"),
         _sparse_route(query_bundle.rewritten or query_bundle.original, scope, top_k, "sparse"),
-        return_exceptions=True,
-    )
+    ]
+    base_labels = ["en_dense", "zh_dense", "hyde_dense", "sparse"]
 
-    labels = ["en_dense", "zh_dense", "hyde_dense", "sparse"]
+    # Expand multi_query variants as additional dense routes (merged into RRF).
+    mq_tasks = [
+        _dense_route(q, scope, top_k, f"mq_{i}")
+        for i, q in enumerate(query_bundle.multi_queries or ())
+    ]
+    mq_labels = [f"mq_{i}" for i in range(len(mq_tasks))]
+
+    results = await asyncio.gather(*base_tasks, *mq_tasks, return_exceptions=True)
+    labels = base_labels + mq_labels
     route_hits: dict[str, list[dict[str, Any]]] = {}
     for label, result in zip(labels, results):
         if isinstance(result, Exception):

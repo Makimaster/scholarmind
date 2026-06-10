@@ -20,6 +20,7 @@ class QueryBundle:
     rewritten: str
     translated_en: str
     hyde_doc: str
+    multi_queries: tuple[str, ...] = ()  # additional query variants from multi_query prompt
 
 
 
@@ -74,10 +75,29 @@ async def optimize_query(
         prompt = render_prompt(load_prompt("hyde"), question=question)
         return await _safe_completion("hyde", prompt, question)
 
-    rewritten, translated_en, hyde_doc = await asyncio.gather(rewrite(), translate(), hyde())
+    async def multi_query() -> tuple[str, ...]:
+        if not settings.ENABLE_MULTI_QUERY:
+            return ()
+        prompt = render_prompt(load_prompt("multi_query"), question=question, n="3")
+        raw = await _safe_completion("multi_query", prompt, "")
+        if not raw:
+            return ()
+        try:
+            import json as _json
+            candidates = _json.loads(raw)
+            if isinstance(candidates, list):
+                return tuple(str(q).strip() for q in candidates if str(q).strip() and str(q).strip() != question)
+        except Exception:
+            pass
+        return ()
+
+    rewritten, translated_en, hyde_doc, multi_queries = await asyncio.gather(
+        rewrite(), translate(), hyde(), multi_query()
+    )
     return QueryBundle(
         original=question,
         rewritten=rewritten,
         translated_en=translated_en,
         hyde_doc=hyde_doc,
+        multi_queries=multi_queries,
     )
