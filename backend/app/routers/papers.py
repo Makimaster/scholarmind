@@ -27,6 +27,16 @@ router = APIRouter(prefix="/papers", tags=["papers"])
 folders_router = APIRouter(prefix="/folders", tags=["folders"])
 
 
+async def _clear_paper_data(user_id: int, paper_id: int, db: AsyncSession) -> None:
+    """Remove all previous parse data for a paper before re-ingesting."""
+    await delete_by_paper(user_id, paper_id)
+    await remove_objects_by_prefix(settings.MINIO_BUCKET_FIG, f"{user_id}/{paper_id}/")
+    await db.execute(
+        text("DELETE FROM doc_blocks WHERE paper_id = :id AND user_id = :user_id"),
+        {"id": paper_id, "user_id": user_id},
+    )
+
+
 async def _get_existing_paper(db: AsyncSession, user_id: int, file_hash: str):
     result = await db.execute(
         text("""
@@ -137,23 +147,21 @@ async def upload_papers(
                         raise
                     paper_id = int(existing["id"])
                     pdf_key = str(existing["pdf_key"])
-                    paper_status = str(existing["status"])
                 else:
                     pdf_key = await upload_pdf(user_id, paper_id, data)
-                    paper_status = "pending"
             else:
                 paper_id = int(existing["id"])
-                pdf_key = str(existing["pdf_key"])
-                paper_status = str(existing["status"])
-            if paper_status == "done":
-                task_id = await _create_task(db, batch_id, user_id, paper_id, filename, file_hash, "done", 100)
-            else:
-                await db.execute(
-                    text("UPDATE papers SET status = 'queued' WHERE id = :paper_id AND user_id = :user_id"),
-                    {"paper_id": paper_id, "user_id": user_id},
-                )
-                task_id = await _create_task(db, batch_id, user_id, paper_id, filename, file_hash, "queued", 0)
-                queued_jobs.append((user_id, paper_id, pdf_key, task_id))
+                # Re-upload PDF to overwrite the old one
+                pdf_key = await upload_pdf(user_id, paper_id, data)
+                # Clear old parse data so the re-ingest starts fresh
+                await _clear_paper_data(user_id, paper_id, db)
+
+            await db.execute(
+                text("UPDATE papers SET status = 'queued' WHERE id = :paper_id AND user_id = :user_id"),
+                {"paper_id": paper_id, "user_id": user_id},
+            )
+            task_id = await _create_task(db, batch_id, user_id, paper_id, filename, file_hash, "queued", 0)
+            queued_jobs.append((user_id, paper_id, pdf_key, task_id))
             task_ids.append(str(task_id))
         await _update_batch_counts(db, batch_id, user_id)
         await db.commit()
