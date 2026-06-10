@@ -87,10 +87,6 @@ async def _save_query_log(
         logger.warning(f"[reviewer] query log write failed: {exc}")
 
 
-def _citations_json(chunk_ids: list[Chunk]) -> str:
-    return "[]" if not chunk_ids else str([chunk.id for chunk in chunk_ids])
-
-
 async def generate_review(
     topic: str,
     scope: RetrievalScope,
@@ -146,6 +142,7 @@ async def generate_review(
             latency_ms=latency_ms,
             answer=fallback,
         )
+        yield sse_event("error", {"msg": str(exc)})
         yield sse_event("token", {"delta": fallback})
         yield sse_event("done", {"latency_ms": latency_ms, "error": str(exc)})
 
