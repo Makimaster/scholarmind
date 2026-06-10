@@ -509,8 +509,11 @@ def _docling_to_blocks(document: Any, exported: dict[str, Any], user_id: int, pa
 
     blocks.sort(key=lambda block: (
         block.page_num or 10**9,
+        # bbox format: [page, left, top, right, bottom] (index 1=left, 2=top)
+        # Two-column layout: left column (left < 0.5 page_width) before right column.
+        # Within a column, sort top-to-bottom (ascending top).
+        round((block.bbox[1] if block.bbox and len(block.bbox) >= 5 else 0) / 300) if block.bbox else 1,
         block.bbox[2] if block.bbox and len(block.bbox) >= 5 else 10**9,
-        block.bbox[1] if block.bbox and len(block.bbox) >= 5 else 10**9,
     ))
     return blocks
 
@@ -882,14 +885,15 @@ async def _write_blocks(user_id: int, paper_id: int, blocks: list[Block], db: As
     for block in blocks:
         result = await db.execute(
             text("""
-                INSERT INTO doc_blocks (paper_id, user_id, block_type, content, page_num, bbox, image_key)
-                VALUES (:paper_id, :user_id, :block_type, :content, :page_num, :bbox, :image_key)
+                INSERT INTO doc_blocks (paper_id, user_id, block_type, content, content_zh, page_num, bbox, image_key)
+                VALUES (:paper_id, :user_id, :block_type, :content, :content_zh, :page_num, :bbox, :image_key)
             """),
             {
                 "paper_id": paper_id,
                 "user_id": user_id,
                 "block_type": block.block_type,
                 "content": block.content,
+                "content_zh": block.content_zh or None,
                 "page_num": block.page_num,
                 "bbox": json.dumps(block.bbox) if block.bbox is not None else None,
                 "image_key": block.image_key,

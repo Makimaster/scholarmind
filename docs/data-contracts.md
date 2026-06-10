@@ -64,6 +64,7 @@ CREATE TABLE doc_blocks (
   user_id     BIGINT NOT NULL,
   block_type  VARCHAR(16) NOT NULL,               -- text|table|figure|formula
   content     LONGTEXT NULL,                       -- 表→HTML，公式→LaTeX，图→caption
+  content_zh  TEXT NULL,                           -- 中文描述/摘要（VLM/enricher 填写，跨语言检索用）
   page_num    INT NULL,
   bbox        JSON NULL,                            -- [page,left,top,right,bottom]
   image_key   VARCHAR(256) NULL,                    -- 图片在 MinIO 的 key
