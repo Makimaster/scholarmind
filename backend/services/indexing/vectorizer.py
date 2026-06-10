@@ -66,18 +66,24 @@ async def vectorize_and_store(
     logger.info(f"[vectorizer] vectorizing {len(chunks)} chunks for paper_id={paper_id}")
 
     content_en_list = [c.content_en for c in chunks]
-    dense_vecs = await embed_texts(content_en_list)
+    # Batch en and zh together to avoid a second embedding round-trip.
+    content_zh_list = [c.content_zh or c.content_en for c in chunks]
+    all_vecs = await embed_texts(content_en_list + content_zh_list)
+    n = len(chunks)
+    dense_vecs = all_vecs[:n]
+    dense_zh_vecs = all_vecs[n:]
     sparse_vecs = _bm25_sparse(chunks)
 
     await delete_by_paper(user_id, paper_id)
 
     records: list[dict] = []
-    for chunk, dense, sparse in zip(chunks, dense_vecs, sparse_vecs):
+    for chunk, dense, dense_zh, sparse in zip(chunks, dense_vecs, dense_zh_vecs, sparse_vecs):
         chunk_id = xxhash.xxh64(chunk.content_en + str(paper_id)).hexdigest()
         records.append({
-            "id":         chunk_id,
-            "dense_vec":  dense,
-            "sparse_vec": sparse if sparse else {0: 0.0},
+            "id":           chunk_id,
+            "dense_vec":    dense,
+            "dense_vec_zh": dense_zh,
+            "sparse_vec":   sparse if sparse else {0: 0.0},
             "content_en": chunk.content_en[:8192],
             "content_zh": (chunk.content_zh or "")[:4096],
             "user_id":    user_id,

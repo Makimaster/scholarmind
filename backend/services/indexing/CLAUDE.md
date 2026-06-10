@@ -6,7 +6,7 @@
 1. 读 `doc_blocks` → 智能切分（按章节/语义，表格/公式整块，15-20% 重叠）。
 2. 大表/图：用 table_summary / figure_caption 提示词生成中文摘要，原件留 `doc_blocks`（小-大检索）。
 3. 普通文本：用 enrich_zh_summary 生成 `content_zh`（中文摘要+关键词）。
-4. 向量化：`clients/llm` 调 embedding（dense + sparse）。
+4. 向量化：`clients/llm` 调 embedding（dense_vec/content_en + dense_vec_zh/content_zh 合批一次请求 + sparse）。
 5. 写 Milvus（collection `scholarmind_chunks`），字段见 data-contracts.md。
 
 ## 关键约定
