@@ -293,6 +293,72 @@ async def delete_paper(id: int, user_id: CurrentUserId = None):  # type: ignore[
     return {"status": "success", "message": f"Paper {id} has been deleted successfully."}
 
 
+# --------------------------------------------------------------------------- reparse paper
+@router.post("/{id}/reparse", status_code=status.HTTP_202_ACCEPTED, summary="强制重新解析",
+    description="重置论文状态并重新入队解析，跳过文件 hash 去重。")
+async def reparse_paper(id: int, user_id: CurrentUserId = None):  # type: ignore[valid-type]
+    async with AsyncSessionLocal() as session:
+        paper = await session.execute(
+            text("SELECT id, pdf_key, folder_id FROM papers WHERE id = :id AND user_id = :user_id LIMIT 1"),
+            {"id": id, "user_id": user_id},
+        )
+        row = paper.mappings().first()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Paper not found")
+
+        pdf_key = str(row["pdf_key"] or "")
+        # Remove old parse data: doc_blocks, Milvus vectors, MinIO figures
+        await delete_by_paper(user_id, id)
+        await remove_objects_by_prefix(settings.MINIO_BUCKET_FIG, f"{user_id}/{id}/")
+        await session.execute(
+            text("DELETE FROM doc_blocks WHERE paper_id = :id AND user_id = :user_id"),
+            {"id": id, "user_id": user_id},
+        )
+        # Reset ingest task: mark as queued again (old task row reused)
+        task_result = await session.execute(
+            text("SELECT id FROM ingest_tasks WHERE paper_id = :id AND user_id = :user_id ORDER BY id DESC LIMIT 1"),
+            {"id": id, "user_id": user_id},
+        )
+        task_row = task_result.mappings().first()
+        if task_row is None:
+            # Create a new ingest task if none exists
+            ingest_result = await session.execute(
+                text("""
+                    INSERT INTO ingest_batches (user_id, total, done, failed, status)
+                    VALUES (:user_id, 1, 0, 0, 'running')
+                """),
+                {"user_id": user_id},
+            )
+            batch_id = int(ingest_result.lastrowid)
+            task_insert = await session.execute(
+                text("""
+                    INSERT INTO ingest_tasks (batch_id, user_id, paper_id, file_name, file_hash, stage, progress)
+                    VALUES (:batch_id, :user_id, :paper_id, :file_name, :file_hash, :stage, :progress)
+                """),
+                {
+                    "batch_id": batch_id, "user_id": user_id, "paper_id": id,
+                    "file_name": "reparse", "file_hash": f"reparse-{id}",
+                    "stage": "queued", "progress": 0,
+                },
+            )
+            task_id = int(ingest_result.lastrowid)
+        else:
+            task_id = int(task_row["id"])
+            await session.execute(
+                text("UPDATE ingest_tasks SET stage = 'queued', progress = 0, error_msg = NULL, updated_at = NOW() WHERE id = :id"),
+                {"id": task_id},
+            )
+
+        await session.execute(
+            text("UPDATE papers SET status = 'queued' WHERE id = :id AND user_id = :user_id"),
+            {"id": id, "user_id": user_id},
+        )
+        await session.commit()
+        enqueue_ingest_task(user_id, id, pdf_key, task_id)
+
+    return {"status": "success", "message": f"Paper {id} has been queued for re-parse.", "task_id": str(task_id)}
+
+
 # --------------------------------------------------------------------------- folders
 @folders_router.get("", response_model=List[FolderResponse],
     summary="文件夹列表", description="获取当前用户的文件夹及论文数量。")

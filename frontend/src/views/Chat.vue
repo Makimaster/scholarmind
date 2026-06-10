@@ -182,7 +182,12 @@ function handleInlineCitationClick(event: MouseEvent) {
 }
 
 onMounted(async () => {
-  await chatStore.ensureConversation();
+  if (chatStore.currentConversation !== null) {
+    await chatStore.loadConversationMessages(chatStore.currentConversation);
+  } else {
+    await chatStore.ensureConversation();
+  }
+  await scrollToBottom();
 });
 
 nextTick(() => messageListRef.value?.addEventListener('click', handleInlineCitationClick));

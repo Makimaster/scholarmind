@@ -380,17 +380,24 @@ def _table_cells_to_html(data: Any) -> str:
 
 
 def _docling_image_bytes(item: Any) -> bytes | None:
-    for key in ("image_bytes", "image", "picture", "data"):
+    for key in ("image_bytes", "image", "picture", "data", "uri"):
         value = _value_from_any(item, (key,))
         if isinstance(value, bytes):
             return value
         if isinstance(value, str):
-            if value.startswith("data:image"):
+            if value.startswith("data:image") or value.startswith("data:"):
                 value = value.split(",", 1)[-1]
             try:
-                return base64.b64decode(value, validate=False)
+                decoded = base64.b64decode(value, validate=False)
+                if len(decoded) >= 8:  # minimum PNG header
+                    return decoded
             except Exception:
                 pass
+        if isinstance(value, dict):
+            # Docling may export nested structures like {"image": {"uri": "data:...", "mime": "image/png"}}
+            inner = _docling_image_bytes(value)
+            if inner is not None:
+                return inner
 
     for method_name in ("get_image", "get_pil_image", "image"):
         method = getattr(item, method_name, None)
@@ -419,13 +426,16 @@ def _crop_figure_from_pdf(pdf_bytes: bytes, page_num: int | None, bbox: list | N
         if page_index < 0 or page_index >= len(doc):
             return None
         page = doc[page_index]
-        # bbox may be [x0, y0, x1, y1] or a string like "x0,y0,x1,y1"
+        # bbox may be [page, left, top, right, bottom] (5 elements) or "x0,y0,x1,y1"
         if isinstance(bbox, str):
             parts = [float(v) for v in bbox.replace(",", " ").split()]
         else:
             parts = [float(v) for v in bbox]
         if len(parts) < 4:
             return None
+        # If 5+ elements, first is page number — skip it to get [left, top, right, bottom]
+        if len(parts) >= 5:
+            parts = parts[1:]
         rect = fitz.Rect(*parts[:4])
         if rect.is_empty or rect.is_infinite:
             return None
@@ -844,7 +854,12 @@ async def parse_paper(
 
     if pdf_bytes is None:
         pdf_bytes = await download_pdf(pdf_key)
+
+    # Clean up old MinIO figures BEFORE parsing, so the new parse can re-upload fresh images.
+    await _cleanup_old_figures(user_id, paper_id)
+
     blocks, metadata = await _parse_document(pdf_key, pdf_bytes, user_id, paper_id)
+
     await _upload_docling_figures(blocks, user_id, paper_id, pdf_bytes=pdf_bytes)
 
     vlm_task = asyncio.create_task(_describe_figures(blocks))
@@ -875,6 +890,17 @@ async def parse_paper(
         title=str(metadata.get("title") or ""),
         abstract=str(metadata.get("abstract") or ""),
     )
+
+
+async def _cleanup_old_figures(user_id: int, paper_id: int) -> None:
+    """Remove all old figure images from MinIO before re-upload so stale images don't linger."""
+    try:
+        from common.clients.minio import remove_objects_by_prefix
+        prefix = f"{user_id}/{paper_id}/"
+        await remove_objects_by_prefix(settings.MINIO_BUCKET_FIG, prefix)
+        logger.info(f"[parse] cleaned figures paper_id={paper_id} prefix={prefix}")
+    except Exception as exc:
+        logger.warning(f"[parse] figure cleanup failed paper_id={paper_id}: {exc}")
 
 
 async def _write_blocks(user_id: int, paper_id: int, blocks: list[Block], db: AsyncSession) -> None:

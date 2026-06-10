@@ -123,6 +123,12 @@
                     >
                       删除
                     </button>
+                    <button
+                      class="reparse-btn"
+                      @click="handleReparse(paper)"
+                    >
+                      重解析
+                    </button>
                   </td>
                 </tr>
                 <tr v-if="!filteredPapers.length">
@@ -378,6 +384,19 @@ async function uploadFiles(files: FileList) {
   startRefreshPolling();
 }
 
+async function handleReparse(paper: { id: number; title: string }) {
+  confirmModal.value = {
+    show: true,
+    title: "🔄 重新解析文献",
+    message: `确定要重新解析 "${paper.title}" 吗？将清除现有解析数据并重新入队。`,
+    onConfirm: async () => {
+      await paperApi.reparse(paper.id);
+      await loadData();
+      startRefreshPolling();
+    },
+  };
+}
+
 function openPaper(paper: any) {
   // TODO: 后续可以传递 paperId 让后端建立 scoped 会话
   router.push({ path: "/chat", query: { paperId: paper.id } });
@@ -602,6 +621,12 @@ th {
   background: transparent;
   color: #c44848;
   border: 0;
+}
+.reparse-btn {
+  background: transparent;
+  color: #1f5f9f;
+  border: 0;
+  margin-left: 8px;
 }
 .empty-row {
   text-align: center;

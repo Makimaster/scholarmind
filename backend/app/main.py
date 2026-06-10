@@ -57,7 +57,6 @@ async def user_rag_settings_middleware(request: Request, call_next):
     user_id = _extract_user_id(request)
     if user_id is not None:
         from common.clients.redis import get_redis
-        from common.config import RAG_BOOL_KEYS, set_rag_overrides
 
         try:
             redis = get_redis()

@@ -109,6 +109,10 @@ export const paperApi = {
     const { data } = await api.delete(`/papers/${id}`);
     return data;
   },
+  async reparse(id: number) {
+    const { data } = await api.post<{ status: string; message: string }>(`/papers/${id}/reparse`);
+    return data;
+  },
   async figureUrl(imageKey: string) {
     const { data } = await api.get<{ url: string }>('/papers/figures/url', { params: { image_key: imageKey } });
     return data.url;

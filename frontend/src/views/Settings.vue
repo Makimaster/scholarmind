@@ -82,7 +82,7 @@
                   <span class="label">意图路由 (Intent Router)</span>
                   <p class="desc">识别闲聊/常识问题，跳过检索流程以省资源和降低延迟</p>
                 </div>
-                <input type="checkbox" v-model="config.ENABLE_INTENT_ROUTER" />
+                <input type="checkbox" v-model="config.ENABLE_INTENT_ROUTER" @change="toggleRagSwitch" />
               </div>
 
               <div class="switch-item">
@@ -90,7 +90,7 @@
                   <span class="label">查询改写 (Query Rewrite)</span>
                   <p class="desc">结合对话历史补全人称指代，并消除口语歧义</p>
                 </div>
-                <input type="checkbox" v-model="config.ENABLE_QUERY_REWRITE" />
+                <input type="checkbox" v-model="config.ENABLE_QUERY_REWRITE" @change="toggleRagSwitch" />
               </div>
 
               <div class="switch-item">
@@ -98,7 +98,7 @@
                   <span class="label">查询扩展 (Multi-Query)</span>
                   <p class="desc">多角度同义句生成，并行多路检索，检索更全面但耗时</p>
                 </div>
-                <input type="checkbox" v-model="config.ENABLE_MULTI_QUERY" />
+                <input type="checkbox" v-model="config.ENABLE_MULTI_QUERY" @change="toggleRagSwitch" />
               </div>
 
               <div class="switch-item">
@@ -106,15 +106,15 @@
                   <span class="label">假设性文档 (HyDE)</span>
                   <p class="desc">先由 LLM 生成一份假设性的论文解答，以此为探针检索，提高匹配度</p>
                 </div>
-                <input type="checkbox" v-model="config.ENABLE_HYDE" />
+                <input type="checkbox" v-model="config.ENABLE_HYDE" @change="toggleRagSwitch" />
               </div>
 
               <div class="switch-item">
                 <div class="switch-info">
                   <span class="label">跨语言翻译 (Bilingual Translation)</span>
-                  <p class="desc">中文查询自动翻译成英文进行检索，解决“中搜英”精度差问题</p>
+                  <p class="desc">中文查询自动翻译成英文进行检索，解决"中搜英"精度差问题</p>
                 </div>
-                <input type="checkbox" v-model="config.ENABLE_QUERY_TRANSLATION" />
+                <input type="checkbox" v-model="config.ENABLE_QUERY_TRANSLATION" @change="toggleRagSwitch" />
               </div>
 
               <div class="switch-item">
@@ -122,7 +122,7 @@
                   <span class="label">检索后重排 (Reranking)</span>
                   <p class="desc">使用重排模型对粗筛召回结果做二次精排，只给 LLM 最相关的片段</p>
                 </div>
-                <input type="checkbox" v-model="config.ENABLE_RERANK" />
+                <input type="checkbox" v-model="config.ENABLE_RERANK" @change="toggleRagSwitch" />
               </div>
 
               <div class="switch-item">
@@ -130,7 +130,7 @@
                   <span class="label">检索打分自适应 (Corrective RAG)</span>
                   <p class="desc">评估召回文本是否能回答该问题，否则执行改写重检索或拒答</p>
                 </div>
-                <input type="checkbox" v-model="config.ENABLE_CORRECTIVE_RAG" />
+                <input type="checkbox" v-model="config.ENABLE_CORRECTIVE_RAG" @change="toggleRagSwitch" />
               </div>
 
               <div class="switch-item">
@@ -138,7 +138,7 @@
                   <span class="label">答案自检反思 (Self-RAG Reflect)</span>
                   <p class="desc">大模型生成后核实每一句是否有据可依，无依据的做删除或标注</p>
                 </div>
-                <input type="checkbox" v-model="config.ENABLE_SELF_RAG_REFLECT" />
+                <input type="checkbox" v-model="config.ENABLE_SELF_RAG_REFLECT" @change="toggleRagSwitch" />
               </div>
             </div>
           </div>
@@ -210,6 +210,25 @@ function handleLogout() {
   router.push('/login');
 }
 
+const ragKeys = [
+  'ENABLE_INTENT_ROUTER', 'ENABLE_QUERY_REWRITE', 'ENABLE_MULTI_QUERY',
+  'ENABLE_HYDE', 'ENABLE_QUERY_TRANSLATION', 'ENABLE_RERANK',
+  'ENABLE_CORRECTIVE_RAG', 'ENABLE_SELF_RAG_REFLECT',
+];
+
+let _toggleTimer: ReturnType<typeof setTimeout> | null = null
+
+async function toggleRagSwitch() {
+  // Debounce: batch rapid toggles into one save
+  if (_toggleTimer) return
+  _toggleTimer = setTimeout(async () => {
+    _toggleTimer = null
+    const payload: Record<string, boolean> = {}
+    for (const key of ragKeys) payload[key] = (config as Record<string, unknown>)[key] as boolean
+    try { await settingsApi.save(payload) } catch { /* fire-and-forget */ }
+  }, 200)
+}
+
 onMounted(async () => {
   try {
     const { settings } = await settingsApi.get();
@@ -222,12 +241,6 @@ onMounted(async () => {
 async function saveSettings() {
   saving.value = true;
   try {
-    // Only send RAG boolean toggle keys to the backend.
-    const ragKeys = [
-      'ENABLE_INTENT_ROUTER', 'ENABLE_QUERY_REWRITE', 'ENABLE_MULTI_QUERY',
-      'ENABLE_HYDE', 'ENABLE_QUERY_TRANSLATION', 'ENABLE_RERANK',
-      'ENABLE_CORRECTIVE_RAG', 'ENABLE_SELF_RAG_REFLECT',
-    ];
     const payload: Record<string, boolean> = {};
     for (const key of ragKeys) payload[key] = (config as Record<string, unknown>)[key] as boolean;
     await settingsApi.save(payload);

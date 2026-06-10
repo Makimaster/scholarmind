@@ -84,7 +84,7 @@ async def chunks_to_citations(chunks: list[Chunk], user_id: int) -> list[dict[st
                 "chunk_id": chunk.id,
                 "bbox": chunk.bbox or "",
                 "chunk_type": chunk.chunk_type,
-                "content": chunk.content_zh or chunk.content_en,
+                "content": chunk.content_en or chunk.content_zh,
                 "image_key": chunk.image_key,
             }
         )

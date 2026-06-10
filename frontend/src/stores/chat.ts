@@ -15,9 +15,9 @@ const STORAGE_KEY = 'scholarmind-conversation-id';
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([]);
   const citations = ref<Citation[]>([]);
-  const _stored = Number(localStorage.getItem(STORAGE_KEY));
+  const _stored = localStorage.getItem(STORAGE_KEY);
   const currentConversation = ref<number | null>(
-    Number.isNaN(_stored) ? null : _stored,
+    _stored !== null ? Number(_stored) : null,
   );
   const streaming = ref(false);
   const activeCitation = ref<Citation | null>(null);
@@ -56,32 +56,10 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function ensureConversation() {
-    // If we already have a conversation, check it still exists
+    // If we already have a valid conversation, return it immediately — no reload
+    // (reloading would overwrite pending UI messages).
     if (currentConversation.value !== null) {
-      try {
-        await loadConversationMessages(currentConversation.value);
-        return currentConversation.value;
-      } catch {
-        // Conversation no longer exists or was deleted, create a new one
-        currentConversation.value = null;
-        localStorage.removeItem(STORAGE_KEY);
-      }
-    }
-
-    // Try to load the most recent conversation
-    if (!conversationsLoaded.value) {
-      try {
-        const conversations = await chatApi.listConversations();
-        conversationsLoaded.value = true;
-        if (conversations.length > 0) {
-          const latest = conversations[0];
-          persistConversationId(latest.id);
-          await loadConversationMessages(latest.id);
-          return latest.id;
-        }
-      } catch {
-        // Backend might be down, continue to create locally
-      }
+      return currentConversation.value;
     }
 
     // Create a new conversation

@@ -7,9 +7,8 @@
   >
     <span class="cite-index">[{{ index + 1 }}]</span>
     <span class="cite-main">
-      <strong>{{ citation.paper_title || `Paper ${citation.paper_id}` }}</strong>
       <small>第 {{ citation.page_num || '-' }} 页 · {{ typeLabel }}</small>
-      <span>{{ summary }}</span>
+      <span v-if="trimmedSummary" class="summary">{{ trimmedSummary }}</span>
     </span>
   </button>
 </template>
@@ -34,9 +33,9 @@ const typeMap: Record<string, string> = {
 };
 
 const typeLabel = computed(() => typeMap[props.citation.chunk_type] || props.citation.chunk_type || '片段');
-const summary = computed(() => {
-  const text = props.citation.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || '无摘要';
-  return text.length > 96 ? `${text.slice(0, 96)}…` : text;
+const trimmedSummary = computed(() => {
+  const text = props.citation.content?.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() || '';
+  return text.length > 64 ? `${text.slice(0, 64)}…` : text;
 });
 </script>
 
@@ -44,11 +43,11 @@ const summary = computed(() => {
 .citation-card {
   width: 100%;
   display: flex;
-  gap: 10px;
+  gap: 8px;
   text-align: left;
-  padding: 12px;
+  padding: 8px 10px;
   border: 1px solid #dfe8e2;
-  border-radius: 12px;
+  border-radius: 8px;
   background: #fbfdf9;
   color: #1a3322;
   cursor: pointer;
@@ -58,30 +57,26 @@ const summary = computed(() => {
 .citation-card.active {
   border-color: #6fcf7f;
   background: #f0faec;
-  box-shadow: 0 8px 20px rgba(15, 61, 36, .08);
 }
 .cite-index {
   font-weight: 800;
   color: #0f7a3a;
   flex: 0 0 auto;
+  font-size: 12px;
 }
 .cite-main {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
-}
-.cite-main strong {
-  font-size: 13px;
-  line-height: 1.35;
+  gap: 2px;
 }
 .cite-main small {
   color: #66806e;
-  font-size: 12px;
+  font-size: 11px;
 }
-.cite-main span {
+.cite-main .summary {
   color: #365442;
   font-size: 12px;
-  line-height: 1.45;
+  line-height: 1.4;
 }
 </style>

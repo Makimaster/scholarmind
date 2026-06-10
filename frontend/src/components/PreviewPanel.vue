@@ -9,7 +9,7 @@
       <div class="meta-card">
         <span class="type-pill">{{ typeLabel }}</span>
         <h3>{{ citation.paper_title || `Paper ${citation.paper_id}` }}</h3>
-        <p>第 {{ citation.page_num || '-' }} 页 · {{ citation.bbox || '无 bbox' }}</p>
+        <p>第 {{ citation.page_num || '-' }} 页</p>
       </div>
 
       <div class="content-card">
