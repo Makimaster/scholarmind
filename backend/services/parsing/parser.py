@@ -408,6 +408,34 @@ def _docling_image_bytes(item: Any) -> bytes | None:
     return None
 
 
+def _crop_figure_from_pdf(pdf_bytes: bytes, page_num: int | None, bbox: list | None) -> bytes | None:
+    """Crop a figure region from PDF using PyMuPDF; returns PNG bytes or None."""
+    if not pdf_bytes or page_num is None or not bbox:
+        return None
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        page_index = int(page_num) - 1  # page_num is 1-based
+        if page_index < 0 or page_index >= len(doc):
+            return None
+        page = doc[page_index]
+        # bbox may be [x0, y0, x1, y1] or a string like "x0,y0,x1,y1"
+        if isinstance(bbox, str):
+            parts = [float(v) for v in bbox.replace(",", " ").split()]
+        else:
+            parts = [float(v) for v in bbox]
+        if len(parts) < 4:
+            return None
+        rect = fitz.Rect(*parts[:4])
+        if rect.is_empty or rect.is_infinite:
+            return None
+        clip = page.get_pixmap(clip=rect, dpi=150)
+        return clip.tobytes("png")
+    except Exception as exc:
+        logger.warning(f"[parse] PDF bbox crop failed page={page_num} bbox={bbox}: {exc}")
+        return None
+
+
 def _docling_content_for_item(item: Any, block_type: str, ref_lookup: dict[str, dict[str, Any]]) -> str:
     if block_type == "table":
         for method_name in ("export_to_html", "export_to_markdown"):
@@ -603,12 +631,17 @@ async def _parse_document(
         raise
 
 
-async def _upload_docling_figures(blocks: list[Block], user_id: int, paper_id: int) -> None:
+async def _upload_docling_figures(blocks: list[Block], user_id: int, paper_id: int, pdf_bytes: bytes | None = None) -> None:
     for index, block in enumerate(blocks, start=1):
-        if block.block_type != "figure" or block.image_key or not block.image_bytes:
+        if block.block_type != "figure" or block.image_key:
+            continue
+        image_bytes = block.image_bytes
+        if not image_bytes and pdf_bytes:
+            image_bytes = _crop_figure_from_pdf(pdf_bytes, block.page_num, block.bbox)
+        if not image_bytes:
             continue
         try:
-            block.image_key = await upload_figure(user_id, paper_id, f"docling-figure-{index}.png", block.image_bytes)
+            block.image_key = await upload_figure(user_id, paper_id, f"docling-figure-{index}.png", image_bytes)
         except Exception as exc:  # noqa: BLE001 - figure upload should not drop parsed text.
             logger.warning(f"[parse] Docling figure upload failed paper_id={paper_id} index={index}: {exc}")
 
@@ -809,7 +842,7 @@ async def parse_paper(
     if pdf_bytes is None:
         pdf_bytes = await download_pdf(pdf_key)
     blocks, metadata = await _parse_document(pdf_key, pdf_bytes, user_id, paper_id)
-    await _upload_docling_figures(blocks, user_id, paper_id)
+    await _upload_docling_figures(blocks, user_id, paper_id, pdf_bytes=pdf_bytes)
 
     vlm_task = asyncio.create_task(_describe_figures(blocks))
 

@@ -13,7 +13,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from common.clients.llm import embed_texts
-from common.clients.milvus import dense_search, sparse_search
+from common.clients.milvus import dense_search, sparse_search, dense_zh_search
 from common.clients.redis import redis_get_json, redis_set_json
 from common.config import settings
 from common.logging import logger
@@ -192,6 +192,16 @@ async def _dense_route(query_text: str, scope: RetrievalScope, top_k: int, label
     return hits
 
 
+async def _dense_zh_route(query_text: str, scope: RetrievalScope, top_k: int, label: str) -> list[dict[str, Any]]:
+    filter_expr = build_scope_filter(scope)
+    vectors = await embed_texts([query_text])
+    if not vectors:
+        return []
+    hits = await dense_zh_search(vectors[0], filter_expr, top_k)
+    logger.info(f"[retrieval] route={label} hits={len(hits)} filter={filter_expr}")
+    return hits
+
+
 async def _sparse_route(query_text: str, scope: RetrievalScope, top_k: int, label: str) -> list[dict[str, Any]]:
     filter_expr = build_scope_filter(scope)
     hits = await sparse_search(_sparse_query_vector(query_text), filter_expr, top_k)
@@ -219,7 +229,7 @@ async def hybrid_search(query_bundle: QueryBundle, scope: RetrievalScope, top_k:
     """Run dense and sparse retrieval routes and fuse them with RRF."""
     results = await asyncio.gather(
         _dense_route(query_bundle.translated_en, scope, top_k, "en_dense"),
-        _dense_route(query_bundle.rewritten, scope, top_k, "zh_dense"),
+        _dense_zh_route(query_bundle.rewritten, scope, top_k, "zh_dense"),
         _dense_route(query_bundle.hyde_doc, scope, top_k, "hyde_dense"),
         _sparse_route(query_bundle.rewritten or query_bundle.original, scope, top_k, "sparse"),
         return_exceptions=True,

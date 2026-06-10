@@ -19,6 +19,7 @@ from common.logging import logger
 _client: MilvusClient | None = None
 _collection_ready = False
 DENSE_INDEX_NAME = "dense_hnsw_idx"
+DENSE_ZH_INDEX_NAME = "dense_zh_hnsw_idx"
 SPARSE_INDEX_NAME = "sparse_inverted_idx"
 
 
@@ -57,8 +58,9 @@ def _build_schema() -> Any:
         num_partitions=64,
     )
     schema.add_field("id",          DataType.VARCHAR,        max_length=64,  is_primary=True)
-    schema.add_field("dense_vec",   DataType.FLOAT_VECTOR,   dim=settings.EMBEDDING_DIM)
-    schema.add_field("sparse_vec",  DataType.SPARSE_FLOAT_VECTOR)
+    schema.add_field("dense_vec",    DataType.FLOAT_VECTOR,   dim=settings.EMBEDDING_DIM)
+    schema.add_field("dense_vec_zh", DataType.FLOAT_VECTOR,   dim=settings.EMBEDDING_DIM)
+    schema.add_field("sparse_vec",   DataType.SPARSE_FLOAT_VECTOR)
     schema.add_field("content_en",  DataType.VARCHAR,        max_length=8192)
     schema.add_field("content_zh",  DataType.VARCHAR,        max_length=4096)
     schema.add_field("user_id",     DataType.INT64)
@@ -74,7 +76,7 @@ def _build_schema() -> Any:
     return schema
 
 
-def _build_index_params(fields: tuple[str, ...] = ("dense_vec", "sparse_vec")) -> Any:
+def _build_index_params(fields: tuple[str, ...] = ("dense_vec", "dense_vec_zh", "sparse_vec")) -> Any:
     from pymilvus import MilvusClient
     index_params = MilvusClient.prepare_index_params()
     if "dense_vec" in fields:
@@ -82,6 +84,14 @@ def _build_index_params(fields: tuple[str, ...] = ("dense_vec", "sparse_vec")) -
             field_name="dense_vec",
             index_type=settings.MILVUS_INDEX_TYPE,
             index_name=DENSE_INDEX_NAME,
+            metric_type=settings.MILVUS_METRIC,
+            params={"M": 16, "efConstruction": 200},
+        )
+    if "dense_vec_zh" in fields:
+        index_params.add_index(
+            field_name="dense_vec_zh",
+            index_type=settings.MILVUS_INDEX_TYPE,
+            index_name=DENSE_ZH_INDEX_NAME,
             metric_type=settings.MILVUS_METRIC,
             params={"M": 16, "efConstruction": 200},
         )
@@ -120,7 +130,7 @@ def _ensure_collection_sync() -> None:
     else:
         missing_fields = tuple(
             field_name
-            for field_name in ("dense_vec", "sparse_vec")
+            for field_name in ("dense_vec", "dense_vec_zh", "sparse_vec")
             if not _has_field_index(client, col, field_name)
         )
         if missing_fields:
@@ -300,3 +310,37 @@ async def sparse_search(
 ) -> list[dict[str, Any]]:
     """Run tenant-safe sparse vector search over indexed Milvus chunks."""
     return await asyncio.to_thread(_sparse_search_sync, vector, filter_expr, limit, output_fields)
+
+
+def _dense_zh_search_sync(
+    vector: list[float],
+    filter_expr: str,
+    limit: int,
+    output_fields: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    if "user_id" not in filter_expr:
+        raise ValueError("Milvus search filter must include user_id")
+
+    _ensure_collection_sync()
+    client = get_milvus_client()
+    fields = output_fields or DEFAULT_CHUNK_OUTPUT_FIELDS
+    results = client.search(
+        collection_name=settings.MILVUS_COLLECTION,
+        data=[vector],
+        anns_field="dense_vec_zh",
+        search_params={"metric_type": settings.MILVUS_METRIC, "params": {"ef": 64}},
+        filter=filter_expr,
+        limit=limit,
+        output_fields=fields,
+    )
+    return _hits_from_results(results, fields)
+
+
+async def dense_zh_search(
+    vector: list[float],
+    filter_expr: str,
+    limit: int,
+    output_fields: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Run tenant-safe dense vector search over the Chinese summary field (dense_vec_zh)."""
+    return await asyncio.to_thread(_dense_zh_search_sync, vector, filter_expr, limit, output_fields)

@@ -188,6 +188,7 @@ CREATE INDEX idx_msg_conv ON messages(conversation_id);
 |---|---|---|
 | `id` | VARCHAR(主键) | `xxhash64(content_en + paper_id)`，幂等去重 |
 | `dense_vec` | FLOAT_VECTOR(1024) | 稠密向量（与 `EMBEDDING_DIM` 一致） |
+| `dense_vec_zh` | FLOAT_VECTOR(EMBEDDING_DIM) | 中文摘要稠密向量，支持中↔中语义检索路 |
 | `sparse_vec` | SPARSE_FLOAT_VECTOR | 稀疏向量（Qwen3/BGE-M3 输出），混合检索 |
 | `content_en` | VARCHAR | 原文（英文） |
 | `content_zh` | VARCHAR | 中文摘要+关键词（跨语言召回） |
@@ -204,6 +205,7 @@ CREATE INDEX idx_msg_conv ON messages(conversation_id);
 
 **索引（必须建，否则全库暴力扫）**：
 - `dense_vec`：`HNSW`，metric `COSINE`，`M=16`，`efConstruction=200`，查询 `ef=64`
+- `dense_vec_zh`：`HNSW`，metric `COSINE`，`M=16`，`efConstruction=200`，查询 `ef=64`（中文摘要独立通道）
 - `sparse_vec`：`SPARSE_INVERTED_INDEX`，metric `IP`
 
 **分区**：`partition_key_field = user_id`（仅做租户物理隔离；**不等于**把该用户全部文档一起搜）。
@@ -249,6 +251,7 @@ CREATE INDEX idx_msg_conv ON messages(conversation_id);
 ## 维度一致性检查清单（防踩坑）
 
 - [ ] `EMBEDDING_DIM`(.env) == Milvus `dense_vec` 维度 == 实际模型输出维度
+- [ ] `EMBEDDING_DIM`(.env) == Milvus `dense_vec_zh` 维度（与 `dense_vec` 相同，同一 embedding 模型）
 - [ ] 每个 chunk 入库必带 `user_id / paper_id / page_num / block_id`（页码和图别再丢）
 - [ ] Milvus collection 创建后**确认索引已 build + load**，否则查询走暴力扫
 - [ ] 所有 DB/Milvus 查询经 `user_id` 过滤中间件
