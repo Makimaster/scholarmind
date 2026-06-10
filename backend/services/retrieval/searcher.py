@@ -15,7 +15,7 @@ from typing import Any
 from common.clients.llm import embed_texts
 from common.clients.milvus import dense_search, sparse_search, dense_zh_search
 from common.clients.redis import redis_get_json, redis_set_json
-from common.config import settings
+from common.config import rag_flag, settings
 from common.logging import logger
 from services.retrieval.query_optimizer import QueryBundle, optimize_query
 
@@ -107,11 +107,11 @@ def _cache_key(query: str, scope: RetrievalScope, top_k: int) -> str:
         "top_k": top_k,
         "rerank_top_n": settings.RERANK_TOP_N,
         "flags": {
-            "rewrite": settings.ENABLE_QUERY_REWRITE,
-            "translation": settings.ENABLE_QUERY_TRANSLATION,
-            "hyde": settings.ENABLE_HYDE,
-            "rerank": settings.ENABLE_RERANK,
-            "corrective": settings.ENABLE_CORRECTIVE_RAG,
+            "rewrite": rag_flag("ENABLE_QUERY_REWRITE"),
+            "translation": rag_flag("ENABLE_QUERY_TRANSLATION"),
+            "hyde": rag_flag("ENABLE_HYDE"),
+            "rerank": rag_flag("ENABLE_RERANK"),
+            "corrective": rag_flag("ENABLE_CORRECTIVE_RAG"),
         },
     }
     # Key format: retr:{md5(query+filters)} — matches data-contracts.md Redis key convention.
@@ -262,7 +262,7 @@ async def hybrid_search(query_bundle: QueryBundle, scope: RetrievalScope, top_k:
 
 async def _two_stage_narrow_scope(query_text: str, scope: RetrievalScope, top_k: int) -> RetrievalScope:
     """When scope has no paper_ids/folder_id, coarse-filter to Top-N papers via title+abstract embed."""
-    if not settings.ENABLE_TWO_STAGE_ROUTING:
+    if not rag_flag("ENABLE_TWO_STAGE_ROUTING"):
         return scope
     if scope.paper_ids or scope.folder_id is not None:
         return scope  # already narrow
@@ -339,7 +339,7 @@ async def retrieve(
 
     chunks = await _retrieve_once(query, scope, top_k, conversation_history, query_bundle=query_bundle)
 
-    if settings.ENABLE_CORRECTIVE_RAG and len(chunks) < MIN_CORRECTIVE_CHUNKS:
+    if rag_flag("ENABLE_CORRECTIVE_RAG") and len(chunks) < MIN_CORRECTIVE_CHUNKS:
         if _retry_used:
             raise RetrievalQualityException("Retrieved evidence is insufficient after one retry")
         logger.info("[retrieval] corrective retry triggered")

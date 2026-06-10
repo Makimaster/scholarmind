@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from common.clients.llm import chat_complete
-from common.config import settings
+from common.config import rag_flag, settings
 from common.logging import logger
 from common.prompts import load_prompt, render_prompt
 
@@ -58,25 +58,25 @@ async def optimize_query(
     history = _history_to_text(conversation_history)
 
     async def rewrite() -> str:
-        if not settings.ENABLE_QUERY_REWRITE:
+        if not rag_flag("ENABLE_QUERY_REWRITE"):
             return question
         prompt = render_prompt(load_prompt("query_rewrite"), question=question, history=history)
         return await _safe_completion("rewrite", prompt, question)
 
     async def translate() -> str:
-        if not settings.ENABLE_QUERY_TRANSLATION:
+        if not rag_flag("ENABLE_QUERY_TRANSLATION"):
             return question
         prompt = render_prompt(load_prompt("query_translate"), question=question)
         return await _safe_completion("translate", prompt, question)
 
     async def hyde() -> str:
-        if not settings.ENABLE_HYDE:
+        if not rag_flag("ENABLE_HYDE"):
             return question
         prompt = render_prompt(load_prompt("hyde"), question=question)
         return await _safe_completion("hyde", prompt, question)
 
     async def multi_query() -> tuple[str, ...]:
-        if not settings.ENABLE_MULTI_QUERY:
+        if not rag_flag("ENABLE_MULTI_QUERY"):
             return ()
         prompt = render_prompt(load_prompt("multi_query"), question=question, n="3")
         raw = await _safe_completion("multi_query", prompt, "")

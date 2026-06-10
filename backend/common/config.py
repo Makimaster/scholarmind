@@ -1,6 +1,35 @@
 import os
+from contextvars import ContextVar
 from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# User-level RAG toggle overrides injected by middleware from Redis.
+# When None, fall back to the env-file default in Settings.
+_user_rag_overrides: ContextVar[dict[str, bool] | None] = ContextVar("rag_overrides", default=None)
+
+
+def get_rag_override(key: str) -> bool | None:
+    """Return the user-level override for a RAG boolean key, or None if not set."""
+    overrides = _user_rag_overrides.get()
+    if overrides is None:
+        return None
+    return overrides.get(key)
+
+
+def set_rag_overrides(overrides: dict[str, bool] | None) -> None:
+    _user_rag_overrides.set(overrides)
+
+
+RAG_BOOL_KEYS = frozenset({
+    "ENABLE_INTENT_ROUTER",
+    "ENABLE_QUERY_REWRITE",
+    "ENABLE_MULTI_QUERY",
+    "ENABLE_HYDE",
+    "ENABLE_QUERY_TRANSLATION",
+    "ENABLE_RERANK",
+    "ENABLE_CORRECTIVE_RAG",
+    "ENABLE_SELF_RAG_REFLECT",
+})
 
 class Settings(BaseSettings):
     APP_ENV: str = "dev"
@@ -118,3 +147,11 @@ class Settings(BaseSettings):
     )
 
 settings = Settings()
+
+# Dynamic RAG flag resolution: check user-level Redis override first, fall back to env/default.
+def rag_flag(name: str) -> bool:
+    """Return user-overridden value for a RAG boolean key, or the env-file default."""
+    override = get_rag_override(name)
+    if override is not None:
+        return override
+    return getattr(settings, name, False)

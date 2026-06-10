@@ -7,7 +7,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from common.clients.llm import chat_complete_json, rerank
-from common.config import settings
+from common.config import rag_flag, settings
 from common.logging import logger
 from common.prompts import load_prompt, render_prompt
 
@@ -35,7 +35,7 @@ async def rerank_chunks(
     top_n = top_n or settings.RERANK_TOP_N
     if not chunks:
         return []
-    if not settings.ENABLE_RERANK:
+    if not rag_flag("ENABLE_RERANK"):
         return chunks[:top_n]
 
     documents = [_chunk_document(chunk) for chunk in chunks]
@@ -82,7 +82,7 @@ def _grade_to_score(data: Any) -> float:
 
 async def corrective_grade(question: str, chunks: list["Chunk"]) -> list["Chunk"]:
     """Grade chunks and filter low-quality evidence when Corrective RAG is enabled."""
-    if not settings.ENABLE_CORRECTIVE_RAG or not chunks:
+    if not rag_flag("ENABLE_CORRECTIVE_RAG") or not chunks:
         return chunks
 
     prompt_template = load_prompt("corrective_grade")

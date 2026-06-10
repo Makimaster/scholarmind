@@ -135,8 +135,13 @@ export const foldersApi = {
 };
 
 export const settingsApi = {
+  async get() {
+    const { data } = await api.get<{ settings: Record<string, boolean> }>('/settings');
+    return data;
+  },
   async save(payload: Record<string, unknown>) {
-    return { ok: true, payload };
+    const { data } = await api.put('/settings', payload);
+    return data;
   },
 };
 

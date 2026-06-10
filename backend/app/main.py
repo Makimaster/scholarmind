@@ -14,9 +14,11 @@ from app.routers.ingest import router as ingest_router
 from app.routers.chat import router as chat_router
 from app.routers.advanced import router as advanced_router
 from app.routers.observability import router as observability_router
-from common.config import settings
+from app.routers.settings import router as settings_router
+from common.config import RAG_BOOL_KEYS, set_rag_overrides, settings
 from common.db.mysql import AsyncSessionLocal
 from common.logging import logger
+import json as _json
 
 app = FastAPI(
     title="ScholarMind API",
@@ -47,6 +49,29 @@ def _extract_user_id(request: Request) -> int | None:
         return int(user_id) if user_id is not None else None
     except (TypeError, ValueError):
         return None
+
+
+@app.middleware("http")
+async def user_rag_settings_middleware(request: Request, call_next):
+    """Load per-user RAG toggle overrides from Redis and inject into contextvar for the request."""
+    user_id = _extract_user_id(request)
+    if user_id is not None:
+        from common.clients.redis import get_redis
+        from common.config import RAG_BOOL_KEYS, set_rag_overrides
+
+        try:
+            redis = get_redis()
+            raw = redis.get(f"user_rag_settings:{user_id}")
+            if raw:
+                overrides = _json.loads(raw if isinstance(raw, str) else raw.decode("utf-8"))
+                overrides = {k: bool(v) for k, v in overrides.items() if k in RAG_BOOL_KEYS}
+                set_rag_overrides(overrides)
+        except Exception:  # noqa: BLE001 — must not block requests
+            pass
+    try:
+        return await call_next(request)
+    finally:
+        set_rag_overrides(None)  # clear contextvar for next request
 
 
 @app.middleware("http")
@@ -92,6 +117,7 @@ app.include_router(ingest_router, prefix="/api")
 app.include_router(chat_router, prefix="/api")
 app.include_router(advanced_router, prefix="/api")
 app.include_router(observability_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
 
 
 @app.get("/health")

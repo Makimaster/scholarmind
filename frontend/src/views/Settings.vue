@@ -32,7 +32,7 @@
 
       <div class="content-body">
         <div v-if="savedBanner" class="saved-banner" @click="dismissBanner">
-      <span>⚠️ 配置仅在本地生效，暂不同步到服务端。点击关闭。</span>
+      <span>✅ 配置已保存，下次检索即时生效。</span>
       <button class="dismiss-btn">×</button>
     </div>
     <form @submit.prevent="saveSettings" class="settings-form">
@@ -172,7 +172,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue';
+import { ref, reactive, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { settingsApi } from '../api';
 import { useAuthStore } from '../stores/auth';
@@ -210,10 +210,27 @@ function handleLogout() {
   router.push('/login');
 }
 
+onMounted(async () => {
+  try {
+    const { settings } = await settingsApi.get();
+    for (const key of Object.keys(settings)) {
+      if (key in config) (config as Record<string, unknown>)[key] = settings[key];
+    }
+  } catch { /* keep defaults if server unreachable */ }
+});
+
 async function saveSettings() {
   saving.value = true;
   try {
-    await settingsApi.save(config as unknown as Record<string, unknown>);
+    // Only send RAG boolean toggle keys to the backend.
+    const ragKeys = [
+      'ENABLE_INTENT_ROUTER', 'ENABLE_QUERY_REWRITE', 'ENABLE_MULTI_QUERY',
+      'ENABLE_HYDE', 'ENABLE_QUERY_TRANSLATION', 'ENABLE_RERANK',
+      'ENABLE_CORRECTIVE_RAG', 'ENABLE_SELF_RAG_REFLECT',
+    ];
+    const payload: Record<string, boolean> = {};
+    for (const key of ragKeys) payload[key] = (config as Record<string, unknown>)[key] as boolean;
+    await settingsApi.save(payload);
     savedBanner.value = true;
     setTimeout(() => { savedBanner.value = false; }, 5000);
   } finally {

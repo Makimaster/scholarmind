@@ -9,7 +9,7 @@ from typing import Any
 from sqlalchemy import text
 
 from common.clients.llm import chat_complete, chat_complete_json
-from common.config import settings
+from common.config import rag_flag, settings
 from common.db.mysql import AsyncSessionLocal as MySQLSessionLocal
 from common.logging import logger
 from common.prompts import load_prompt, render_prompt
@@ -36,7 +36,7 @@ def build_scope(user_id: int, scope_type: str, folder_id: int | None, paper_ids:
 
 
 async def route_intent(question: str, history: list[dict[str, str]]) -> str:
-    if not settings.ENABLE_INTENT_ROUTER:
+    if not rag_flag("ENABLE_INTENT_ROUTER"):
         return "knowledge"
     prompt = render_prompt(load_prompt("intent_router"), question=question, history=history_to_text(history))
     try:
@@ -189,7 +189,7 @@ async def _rag_answer(
         context=context,
     )
     answer = await chat_complete(prompt, max_tokens=settings.LLM_MAX_TOKENS)
-    if settings.ENABLE_SELF_RAG_REFLECT:
+    if rag_flag("ENABLE_SELF_RAG_REFLECT"):
         answer = await _self_rag_reflect(answer, context)
     return answer, chunks, citations, query_bundle.rewritten
 
