@@ -10,35 +10,106 @@ export interface ChatMessage {
   latency_ms?: number;
 }
 
+const STORAGE_KEY = 'scholarmind-conversation-id';
+
 export const useChatStore = defineStore('chat', () => {
-  const messages = ref<ChatMessage[]>([
-    {
-      id: 1,
-      role: 'assistant',
-      content: '您好！我是您的跨语言文献调研助手“文渊”。请问有什么关于论文、公式或图表的问题我可以帮您解答？',
-      citations: [],
-    },
-  ]);
+  const messages = ref<ChatMessage[]>([]);
   const citations = ref<Citation[]>([]);
-  const currentConversation = ref<number | null>(null);
+  const currentConversation = ref<number | null>(
+    Number(localStorage.getItem(STORAGE_KEY)) || null,
+  );
   const streaming = ref(false);
   const activeCitation = ref<Citation | null>(null);
+  const conversationsLoaded = ref(false);
 
-  const currentAssistantMessage = computed(() => [...messages.value].reverse().find((msg) => msg.role === 'assistant'));
+  const currentAssistantMessage = computed(() =>
+    [...messages.value].reverse().find((msg) => msg.role === 'assistant'),
+  );
+
+  function persistConversationId(id: number) {
+    currentConversation.value = id;
+    localStorage.setItem(STORAGE_KEY, String(id));
+  }
+
+  async function loadConversationMessages(conversationId: number) {
+    try {
+      const history = await chatApi.listMessages(conversationId);
+      messages.value = history.map((m: any) => ({
+        id: m.id,
+        role: m.role,
+        content: m.content,
+        citations: (m.citations || []) as Citation[],
+      }));
+      if (history.length > 0) {
+        const lastAssistant = [...history].reverse().find(
+          (m: any) => m.role === 'assistant',
+        );
+        if (lastAssistant?.citations?.length) {
+          citations.value = lastAssistant.citations as Citation[];
+          activeCitation.value = citations.value[0] || null;
+        }
+      }
+    } catch {
+      messages.value = [];
+    }
+  }
 
   async function ensureConversation() {
-    if (currentConversation.value !== null) return currentConversation.value;
-    const conversation = await chatApi.createConversation({ title: '文献调研会话' });
-    currentConversation.value = conversation.id;
+    // If we already have a conversation, check it still exists
+    if (currentConversation.value !== null) {
+      try {
+        await loadConversationMessages(currentConversation.value);
+        return currentConversation.value;
+      } catch {
+        // Conversation no longer exists or was deleted, create a new one
+        currentConversation.value = null;
+        localStorage.removeItem(STORAGE_KEY);
+      }
+    }
+
+    // Try to load the most recent conversation
+    if (!conversationsLoaded.value) {
+      try {
+        const conversations = await chatApi.listConversations();
+        conversationsLoaded.value = true;
+        if (conversations.length > 0) {
+          const latest = conversations[0];
+          persistConversationId(latest.id);
+          await loadConversationMessages(latest.id);
+          return latest.id;
+        }
+      } catch {
+        // Backend might be down, continue to create locally
+      }
+    }
+
+    // Create a new conversation
+    const conversation = await chatApi.createConversation({
+      title: '文献调研会话',
+    });
+    persistConversationId(conversation.id);
+    messages.value = [];
+    citations.value = [];
+    activeCitation.value = null;
     return conversation.id;
   }
 
   function appendUserMessage(content: string) {
-    messages.value.push({ id: Date.now(), role: 'user', content, citations: [] });
+    messages.value.push({
+      id: Date.now(),
+      role: 'user',
+      content,
+      citations: [],
+    });
   }
 
   function startAssistantMessage() {
-    const message: ChatMessage = { id: Date.now() + 1, role: 'assistant', content: '', citations: [] };
+    const message: ChatMessage = {
+      id: Date.now() + 1,
+      role: 'assistant',
+      content: '',
+      citations: [],
+    };
     messages.value.push(message);
     citations.value = [];
     streaming.value = true;
@@ -73,6 +144,7 @@ export const useChatStore = defineStore('chat', () => {
     currentConversation,
     streaming,
     activeCitation,
+    conversationsLoaded,
     ensureConversation,
     appendUserMessage,
     startAssistantMessage,
@@ -80,5 +152,7 @@ export const useChatStore = defineStore('chat', () => {
     appendCitation,
     finishStreaming,
     selectCitation,
+    persistConversationId,
+    loadConversationMessages,
   };
 });

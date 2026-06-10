@@ -1,4 +1,4 @@
-import api, { API_BASE_URL, authHeaders } from './request';
+import api, { API_BASE_URL, apiUrl, authHeaders } from './request';
 
 export interface LoginPayload { username: string; password: string }
 export interface RegisterPayload { username: string; email: string; password: string }
@@ -73,7 +73,7 @@ export const authApi = {
 };
 
 export const chatApi = {
-  queryUrl: `${API_BASE_URL}/chat/query`,
+  queryUrl() { return apiUrl('/chat/query'); },
   headers: authHeaders,
   async createConversation(payload: { title?: string; folder_id?: number | null; paper_ids?: number[] }) {
     const { data } = await api.post('/chat/conversations', payload);
@@ -135,7 +135,7 @@ export const settingsApi = {
 };
 
 export const reviewApi = {
-  generateUrl: `${API_BASE_URL}/review/generate`,
+  generateUrl() { return apiUrl('/review/generate'); },
   headers: authHeaders,
 };
 
@@ -154,5 +154,5 @@ export const observabilityApi = {
   },
 };
 
-export { api, API_BASE_URL, authHeaders };
+export { api, API_BASE_URL, apiUrl, authHeaders };
 export default api;

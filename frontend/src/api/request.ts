@@ -31,10 +31,19 @@ api.interceptors.response.use(
 
 export function authHeaders(): HeadersInit {
   const token = localStorage.getItem('token');
-  return {
+  const headers: HeadersInit = {
     'Content-Type': 'application/json',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
   };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+/** Build an absolute URL for fetch()-based SSE requests using the same base as axios. */
+export function apiUrl(path: string): string {
+  const base = import.meta.env.VITE_API_BASE || '';
+  return `${base}${path}`;
 }
 
 export default api;

@@ -118,7 +118,7 @@ async function sendMessage() {
   try {
     const conversationId = await chatStore.ensureConversation();
     const paperIds = scopedPaperIds.value;
-    const response = await fetch(chatApi.queryUrl, {
+    const response = await fetch(chatApi.queryUrl(), {
       method: 'POST',
       headers: chatApi.headers(),
       body: JSON.stringify({
