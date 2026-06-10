@@ -251,6 +251,47 @@ async def hybrid_search(query_bundle: QueryBundle, scope: RetrievalScope, top_k:
     return fused
 
 
+async def _two_stage_narrow_scope(query_text: str, scope: RetrievalScope, top_k: int) -> RetrievalScope:
+    """When scope has no paper_ids/folder_id, coarse-filter to Top-N papers via title+abstract embed."""
+    if not settings.ENABLE_TWO_STAGE_ROUTING:
+        return scope
+    if scope.paper_ids or scope.folder_id is not None:
+        return scope  # already narrow
+
+    from common.db.mysql import AsyncSessionLocal
+    from sqlalchemy import text as sqla_text
+
+    vectors = await embed_texts([query_text])
+    if not vectors:
+        return scope
+    filter_expr = f"user_id == {scope.user_id}"
+    hits = await dense_search(vectors[0], filter_expr, settings.TWO_STAGE_TOP_PAPERS)
+    paper_ids = sorted({int(h["paper_id"]) for h in hits if h.get("paper_id")})
+    if not paper_ids:
+        return scope
+    logger.info(f"[retrieval] two-stage coarse filter user_id={scope.user_id} papers={len(paper_ids)}")
+    return RetrievalScope(user_id=scope.user_id, paper_ids=paper_ids)
+
+
+def _dedup_chunks(chunks: list[Chunk]) -> list[Chunk]:
+    """Remove duplicate chunks (same id or same content_en prefix)."""
+    seen_ids: set[str] = set()
+    seen_content: set[str] = set()
+    out: list[Chunk] = []
+    for chunk in chunks:
+        if chunk.id in seen_ids:
+            continue
+        # 80-char prefix dedup to collapse near-duplicate chunks from overlapping windows.
+        prefix = (chunk.content_en or "")[:80].strip()
+        if prefix and prefix in seen_content:
+            continue
+        seen_ids.add(chunk.id)
+        if prefix:
+            seen_content.add(prefix)
+        out.append(chunk)
+    return out
+
+
 async def _retrieve_once(
     query: str,
     scope: RetrievalScope,
@@ -261,9 +302,11 @@ async def _retrieve_once(
     from services.retrieval.reranker import corrective_grade, rerank_chunks
 
     bundle = query_bundle or await optimize_query(query, conversation_history)
-    candidates = await hybrid_search(bundle, scope, top_k)
+    narrowed_scope = await _two_stage_narrow_scope(bundle.translated_en or bundle.rewritten or query, scope, top_k)
+    candidates = await hybrid_search(bundle, narrowed_scope, top_k)
     reranked = await rerank_chunks(bundle.rewritten or query, candidates, settings.RERANK_TOP_N)
-    return await corrective_grade(query, reranked)
+    graded = await corrective_grade(query, reranked)
+    return _dedup_chunks(graded)
 
 
 async def retrieve(

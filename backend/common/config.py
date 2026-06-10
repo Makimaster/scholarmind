@@ -107,6 +107,8 @@ class Settings(BaseSettings):
     ENABLE_QUERY_TRANSLATION: bool = True
     ENABLE_RERANK: bool = True
     ENABLE_CORRECTIVE_RAG: bool = False
+    ENABLE_TWO_STAGE_ROUTING: bool = True     # coarse paper filter before chunk search when scope is unbound
+    TWO_STAGE_TOP_PAPERS: int = 20            # max papers to keep after coarse filter
     ENABLE_SELF_RAG_REFLECT: bool = False
 
     model_config = SettingsConfigDict(
