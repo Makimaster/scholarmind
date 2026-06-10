@@ -49,13 +49,15 @@ async def _enrich_text(chunk: Chunk) -> None:
         )
         result = await chat_complete_json(prompt, system="You are an academic Chinese summarizer.")
         if isinstance(result, dict):
-            summary = result.get("summary_zh", "")
-            keywords = result.get("keywords_zh", [])
+            summary = result.get("summary_zh") or result.get("summary") or ""
+            keywords = result.get("keywords_zh") or result.get("keywords") or []
             if isinstance(keywords, list):
                 keywords_str = "、".join(str(k) for k in keywords)
             else:
                 keywords_str = str(keywords)
-            chunk.content_zh = f"{summary}\n关键词：{keywords_str}".strip()
+            chunk.content_zh = f"{summary}\n关键词：{keywords_str}".strip() or chunk.content_en[:200]
+        elif isinstance(result, str) and result.strip():
+            chunk.content_zh = result.strip()[:500]
         else:
             chunk.content_zh = chunk.content_en[:200]
     except Exception as e:
