@@ -157,7 +157,7 @@ async def upload_papers(
                 await _clear_paper_data(user_id, paper_id, db)
 
             await db.execute(
-                text("UPDATE papers SET status = 'queued' WHERE id = :paper_id AND user_id = :user_id"),
+                text("UPDATE papers SET status = 'queued', updated_at = NOW() WHERE id = :paper_id AND user_id = :user_id"),
                 {"paper_id": paper_id, "user_id": user_id},
             )
             task_id = await _create_task(db, batch_id, user_id, paper_id, filename, file_hash, "queued", 0)
@@ -225,7 +225,8 @@ async def list_papers(
             id=int(r["id"]), title=str(r["title"] or ""), authors=r.get("authors"), journal=None, year=r.get("year"),
             abstract=r.get("abstract"), folder_id=r.get("folder_id"),
             status=str(r["status"] or "pending"), file_key=str(r["pdf_key"] or ""),
-            file_size=0, pages=r.get("num_pages") or 0, created_at=r["created_at"], batch_id=None,
+            file_size=0, pages=r.get("num_pages") or 0, created_at=r["created_at"],
+            updated_at=r.get("updated_at"), batch_id=None,
         )
         for r in rows
     ]

@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS papers (
   chunk_count  INT NOT NULL DEFAULT 0,
   status       VARCHAR(16)  NOT NULL DEFAULT 'pending', -- pending|queued|parsing|indexing|done|failed
   created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY uk_user_filehash (user_id, file_hash),
   INDEX idx_papers_user (user_id),
   INDEX idx_papers_folder (folder_id)

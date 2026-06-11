@@ -26,6 +26,7 @@ class PaperResponse(BaseModel):
     file_size: int
     pages: int = 0
     created_at: datetime
+    updated_at: Optional[datetime] = None
     batch_id: Optional[str] = None
 
 class PaperUploadResponse(BaseModel):

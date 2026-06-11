@@ -115,7 +115,7 @@
                       statusMap[paper.status] || paper.status
                     }}</span>
                   </td>
-                  <td>{{ formatBeijingTime(paper.created_at) }}</td>
+                  <td>{{ formatBeijingTime(paper.updated_at || paper.created_at) }}</td>
                   <td>
                     <button
                       class="delete-btn"

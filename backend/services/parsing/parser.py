@@ -433,10 +433,16 @@ def _crop_figure_from_pdf(pdf_bytes: bytes, page_num: int | None, bbox: list | N
             parts = [float(v) for v in bbox]
         if len(parts) < 4:
             return None
-        # If 5+ elements, first is page number — skip it to get [left, top, right, bottom]
+        # If 5+ elements, first is page number — skip it to get [left, y0, right, y1]
         if len(parts) >= 5:
             parts = parts[1:]
-        rect = fitz.Rect(*parts[:4])
+        x0, y0, x1, y1 = parts[:4]
+        # Docling exports bbox in bottom-up PDF coords (y=0 at page bottom).
+        # PyMuPDF uses top-down coords (y=0 at page top). Detect by y0 > y1 and flip.
+        if y0 > y1:
+            h = page.rect.height
+            y0, y1 = h - y0, h - y1
+        rect = fitz.Rect(x0, y0, x1, y1)
         if rect.is_empty or rect.is_infinite:
             return None
         clip = page.get_pixmap(clip=rect, dpi=150)
