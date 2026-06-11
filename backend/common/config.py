@@ -102,6 +102,7 @@ class Settings(BaseSettings):
 
     # MinIO
     MINIO_ENDPOINT: str = "minio:9000"
+    MINIO_PUBLIC_ENDPOINT: Optional[str] = None  # 浏览器可达地址，如 localhost:9000；为空则同 MINIO_ENDPOINT
     MINIO_ACCESS_KEY: str = "minioadmin"
     MINIO_SECRET_KEY: str = "minioadmin"
     MINIO_BUCKET_PDF: str = "papers"

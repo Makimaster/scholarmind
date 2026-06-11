@@ -76,12 +76,19 @@ async def upload_figure(
 
 async def presigned_get_url(bucket: str, key: str, expires_seconds: int = 3600) -> str:
     await ensure_buckets()
-    return await asyncio.to_thread(
+    url = await asyncio.to_thread(
         _client.presigned_get_object,
         bucket,
         key,
         expires=timedelta(seconds=expires_seconds),
     )
+    # Replace internal Docker hostname with the browser-accessible public endpoint.
+    public = settings.MINIO_PUBLIC_ENDPOINT
+    if public:
+        internal = settings.MINIO_ENDPOINT
+        scheme = "https" if settings.MINIO_SECURE else "http"
+        url = url.replace(f"{scheme}://{internal}", f"{scheme}://{public}", 1)
+    return url
 
 
 async def remove_object(bucket: str, key: str | None) -> None:

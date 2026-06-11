@@ -359,7 +359,7 @@ async def reparse_paper(id: int, user_id: CurrentUserId = None):  # type: ignore
             )
 
         await session.execute(
-            text("UPDATE papers SET status = 'queued' WHERE id = :id AND user_id = :user_id"),
+            text("UPDATE papers SET status = 'queued', updated_at = NOW() WHERE id = :id AND user_id = :user_id"),
             {"id": id, "user_id": user_id},
         )
         await session.commit()
