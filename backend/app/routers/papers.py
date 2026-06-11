@@ -4,7 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
+from fastapi.responses import Response
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,7 +18,7 @@ from app.schemas.papers import (
     PaperResponse,
     PaperUploadResponse,
 )
-from common.clients.minio import presigned_get_url, remove_object, remove_objects_by_prefix, upload_pdf
+from common.clients.minio import download_object, download_pdf, presigned_get_url, remove_object, remove_objects_by_prefix, upload_pdf
 from common.config import settings
 from common.clients.milvus import delete_by_paper
 from common.clients.redis import enqueue_ingest_task
@@ -239,6 +240,19 @@ async def get_figure_url(image_key: str, user_id: CurrentUserId = None):  # type
     if not image_key.startswith(prefix):
         raise HTTPException(status_code=404, detail="Figure not found")
     return {"url": await presigned_get_url(settings.MINIO_BUCKET_FIG, image_key)}
+
+
+@router.get("/figures/{image_key:path}", summary="代理图像下载", description="通过后端代理下载 MinIO 图像文件，解决浏览器无法直接访问 MinIO 的问题。")
+async def get_figure_proxy(image_key: str, user_id: CurrentUserId = None):  # type: ignore[valid-type]
+    """Proxy endpoint to serve figures from MinIO directly. Avoids presigned URL host mismatch issues."""
+    prefix = f"{user_id}/"
+    if not image_key.startswith(prefix):
+        raise HTTPException(status_code=404, detail="Figure not found")
+    try:
+        data = await download_object(settings.MINIO_BUCKET_FIG, image_key)
+        return Response(content=data, media_type="image/png")
+    except Exception:
+        raise HTTPException(status_code=404, detail="Figure not found")
 
 
 # --------------------------------------------------------------------------- paper detail

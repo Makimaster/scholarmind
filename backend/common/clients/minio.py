@@ -74,21 +74,36 @@ async def upload_figure(
     return await upload_object(settings.MINIO_BUCKET_FIG, key, data, content_type)
 
 
-async def presigned_get_url(bucket: str, key: str, expires_seconds: int = 3600) -> str:
+async def download_object(bucket: str, key: str) -> bytes:
+    """Download object bytes directly from MinIO (for proxying to browser)."""
     await ensure_buckets()
-    url = await asyncio.to_thread(
+
+    def _download() -> bytes:
+        response = _client.get_object(bucket, key)
+        try:
+            return response.read()
+        finally:
+            response.close()
+            response.release_conn()
+
+    return await asyncio.to_thread(_download)
+
+
+async def presigned_get_url(bucket: str, key: str, expires_seconds: int = 3600) -> str:
+    """Generate a presigned URL.
+
+    The URL is signed with the internal host (e.g. minio:9000), which means
+    it is only valid when the caller can reach that host.  For browser access
+    (which cannot reach the Docker-internal host), use the /papers/figures/{key}
+    proxy endpoint instead.
+    """
+    await ensure_buckets()
+    return await asyncio.to_thread(
         _client.presigned_get_object,
         bucket,
         key,
         expires=timedelta(seconds=expires_seconds),
     )
-    # Replace internal Docker hostname with the browser-accessible public endpoint.
-    public = settings.MINIO_PUBLIC_ENDPOINT
-    if public:
-        internal = settings.MINIO_ENDPOINT
-        scheme = "https" if settings.MINIO_SECURE else "http"
-        url = url.replace(f"{scheme}://{internal}", f"{scheme}://{public}", 1)
-    return url
 
 
 async def remove_object(bucket: str, key: str | None) -> None:

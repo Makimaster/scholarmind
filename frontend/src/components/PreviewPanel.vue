@@ -45,7 +45,6 @@ import DOMPurify from 'dompurify';
 import katex from 'katex';
 import 'katex/dist/katex.min.css';
 import type { Citation } from '../api';
-import { paperApi } from '../api';
 
 const props = defineProps<{ citation: Citation | null }>();
 const zoom = ref(1);
@@ -57,11 +56,8 @@ watch(() => props.citation, async (citation) => {
   imageLoadError.value = false;
   figureUrl.value = '';
   if (!citation?.image_key) return;
-  try {
-    figureUrl.value = await paperApi.figureUrl(citation.image_key);
-  } catch {
-    imageLoadError.value = true;
-  }
+  // Use proxy endpoint to avoid MinIO presigned URL host mismatch
+  figureUrl.value = `/api/papers/figures/${citation.image_key}`;
 }, { immediate: true });
 
 const typeMap: Record<string, string> = { text: '文本段落', table: 'HTML 表格', figure: '论文图像', formula: '公式' };
