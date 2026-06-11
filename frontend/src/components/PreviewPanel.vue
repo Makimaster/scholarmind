@@ -16,10 +16,10 @@
         <p v-if="citation.chunk_type === 'text'" class="text-block">{{ citation.content }}</p>
         <div v-else-if="citation.chunk_type === 'table'" class="table-block" v-html="safeHtml"></div>
         <div v-else-if="citation.chunk_type === 'figure'" class="figure-block">
-          <img v-if="figureUrl" :src="figureUrl" :style="{ transform: `scale(${zoom})` }" alt="引用图像"
+          <img v-if="figureBlobUrl" :src="figureBlobUrl" :style="{ transform: `scale(${zoom})` }" alt="引用图像"
                @error="imageLoadError = true" />
           <div v-if="imageLoadError" class="empty-figure">图片暂不可用</div>
-          <div v-else-if="props.citation?.image_key && !figureUrl" class="empty-figure">图片加载中...</div>
+          <div v-else-if="props.citation?.image_key && !figureBlobUrl" class="empty-figure">图片加载中...</div>
           <div v-else-if="!props.citation?.image_key" class="empty-figure">暂无图片</div>
           <p>{{ citation.content }}</p>
           <div class="zoom-actions">
@@ -49,15 +49,24 @@ import type { Citation } from '../api';
 const props = defineProps<{ citation: Citation | null }>();
 const zoom = ref(1);
 const imageLoadError = ref(false);
-const figureUrl = ref('');
+const figureBlobUrl = ref('');
 
 watch(() => props.citation, async (citation) => {
   zoom.value = 1;
   imageLoadError.value = false;
-  figureUrl.value = '';
+  figureBlobUrl.value = '';
   if (!citation?.image_key) return;
-  // Use proxy endpoint to avoid MinIO presigned URL host mismatch
-  figureUrl.value = `/api/papers/figures/${citation.image_key}`;
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`/api/papers/figures/${citation.image_key}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    figureBlobUrl.value = URL.createObjectURL(blob);
+  } catch {
+    imageLoadError.value = true;
+  }
 }, { immediate: true });
 
 const typeMap: Record<string, string> = { text: '文本段落', table: 'HTML 表格', figure: '论文图像', formula: '公式' };
